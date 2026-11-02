@@ -1,3 +1,8 @@
+// Existing cases exercise the explicitly schema-absent legacy path.
+vi.mock("@/lib/seed-pool/server", () => ({
+  resolveSeedPool: vi.fn().mockResolvedValue({ status: "none", schemaInstalled: false, ownerLocalDate: null, timezone: null, snapshot: null, revision: 0, revocationGeneration: 0 }),
+  putSeedPreparedBatch: vi.fn(), markSeedBatchServed: vi.fn(), recordSeedFeedServed: vi.fn(), claimSeedDigest: vi.fn(), validateSeedDigestSend: vi.fn(), persistSeedDigestEmailAttempt: vi.fn(),
+}));
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import type { ProfileRow } from "@/app/api/jobs/dispatch-digests/route";

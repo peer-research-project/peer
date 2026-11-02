@@ -20,6 +20,10 @@ import { createHash } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { runFeedPipeline } from "@/lib/feed/pipeline";
+import { resolveSeedPool, recordSeedFeedServed, claimSeedDigest, validateSeedDigestSend, persistSeedDigestEmailAttempt, type SeedDigestSend } from "@/lib/seed-pool/server";
+import { seedOutputContext } from "@/lib/seed-pool/output";
+import { freezeSeedDigestItems } from "@/lib/seed-pool/digest-batch";
+import { createTrustedPaperCacheScope } from "@/lib/opportunities/private-paper-cache";
 import type { FeedControls } from "@/lib/feed/profile-compiler";
 import { sendDigestEmail } from "@/lib/email/send-digest";
 import {
@@ -150,8 +154,9 @@ async function sendFirstDigestAttemptWithIdempotency(params: {
   // the P4-S7-IDEM header comment above), so it needs its own copy of the
   // code to pass to the template functions below.
   emptyReasonCode?: FeedEmptyReasonCode;
+  seedFence?: SeedDigestSend;
 }) {
-  const { admin, deliveryId, currentPayload, to, firstName, items, originUrl, idempotencyKey, emptyReasonCode } = params;
+  const { admin, deliveryId, currentPayload, to, firstName, items, originUrl, idempotencyKey, emptyReasonCode, seedFence } = params;
 
   const render = {
     subject: renderDigestSubject(items),
@@ -160,22 +165,20 @@ async function sendFirstDigestAttemptWithIdempotency(params: {
   };
   const attemptedAt = new Date().toISOString();
 
-  await persistDigestEmailAttempt(admin, deliveryId, currentPayload, {
-    idempotencyKey,
-    to,
-    subject: render.subject,
-    html: render.html,
-    text: render.text,
-    attemptedAt,
-  });
+  const email = { idempotencyKey, to, subject: render.subject, html: render.html, text: render.text, attemptedAt };
+  if (seedFence) {
+    const persisted = await persistSeedDigestEmailAttempt({ ...seedFence, email });
+    if (persisted?.status !== "persisted") return { sent: false, error: "seed_pool_changed" };
+    const allowed = await validateSeedDigestSend(seedFence);
+    if (allowed?.status !== "allowed") return { sent: false, error: "seed_pool_changed" };
+  } else await persistDigestEmailAttempt(admin, deliveryId, currentPayload, email);
 
   const result = await sendDigestEmail({ to, firstName, items, originUrl, idempotencyKey, render });
 
   if (result.sent) {
-    await persistDigestEmailAttempt(admin, deliveryId, currentPayload, {
-      sent: true,
-      sentAt: new Date().toISOString(),
-    });
+    const confirmed = { sent: true as const, sentAt: new Date().toISOString() };
+    if (seedFence) await persistSeedDigestEmailAttempt({ ...seedFence, email: confirmed });
+    else await persistDigestEmailAttempt(admin, deliveryId, currentPayload, confirmed);
   }
   return result;
 }
@@ -511,6 +514,11 @@ export async function GET(req: NextRequest) {
         (pastDeliveries ?? []).flatMap((d) => (d.item_ids as string[] | null) ?? []),
       );
 
+      const seedContext = seedOutputContext(await resolveSeedPool(row.user_id, { now }));
+      if (seedContext.kind === "unavailable") { bumpReason(failedReasons, "seed_pool_unavailable"); continue; }
+      const seedOptions = seedContext.kind === "ready" ? { seedSnapshot: seedContext.snapshot ?? undefined, seedPoolVersion: seedContext.version, seedRevocationGeneration: seedContext.revocationGeneration, seedTargetLocalDate: seedContext.localDate } : {};
+      const seedScope = seedContext.kind === "ready" && seedContext.version !== "none" ? createTrustedPaperCacheScope({ ownerId: row.user_id, topics: normalizedFeed.request.topics, methods: normalizedFeed.request.methods, project: normalizedFeed.request.project, challenge: normalizedFeed.request.challenge, intent: normalizedFeed.request.intent, aiTier: 0 }) : undefined;
+
       const targetCount = row.paper_count ?? 10;
       // Push the dedup down into the pipeline: it now filters seen IDs after
       // ranking but BEFORE topN slicing, so we get a full set of fresh items
@@ -535,9 +543,18 @@ export async function GET(req: NextRequest) {
         // search key and runs no web search on behalf of every enrolled user
         // either. A future reader removing one of these should see the other.
         aiTier: 0,
-      });
+        ...(seedScope ? { paperCacheScope: seedScope } : {}),
+      }, ...(seedContext.kind === "ready" && seedContext.version !== "none" ? [seedOptions] as const : [] as const));
 
-      const freshItems = feed.items.filter((i) => !seenIds.has(i.id)).slice(0, targetCount);
+      let freshItems = feed.items.filter((i) => !seenIds.has(i.id)).slice(0, targetCount);
+      if (seedContext.kind === "ready" && seedContext.version !== "none") {
+        const frozen = await freezeSeedDigestItems(row.user_id, seedContext, freshItems);
+        if (!frozen) { bumpReason(failedReasons, "seed_pool_changed"); continue; }
+        freshItems = frozen;
+      } else if (seedContext.kind === "ready") {
+        const marked = await recordSeedFeedServed({ ownerId: row.user_id, localDate: seedContext.localDate, expectedVersion: seedContext.version, expectedRevocationGeneration: seedContext.revocationGeneration });
+        if (marked?.status !== "recorded") { bumpReason(failedReasons, "seed_pool_changed"); continue; }
+      }
       const itemIds = freshItems.map((i) => i.id);
       const isEmailChannel = row.digest_channel === "email" || row.digest_channel === "both";
 
@@ -549,7 +566,21 @@ export async function GET(req: NextRequest) {
       let claimedRowId: number | undefined;
       let idempotencyKeyForEmail: string | undefined;
 
-      if (isDigestDedupeEnabled()) {
+      if (seedContext.kind === "ready" && seedContext.version !== "none") {
+        const localDate = seedContext.localDate;
+        if (isEmailChannel) idempotencyKeyForEmail = digestIdempotencyKey(row.user_id, localDate);
+        const claimed = await claimSeedDigest({ ownerId: row.user_id, localDate, expectedVersion: seedContext.version, expectedRevocationGeneration: seedContext.revocationGeneration, channel: row.digest_channel, itemIds, payload: { items: freshItems } });
+        if (claimed?.status === "conflict") {
+          if (!isEmailChannel) { bumpReason(skippedReasons, "already_claimed"); continue; }
+          const outcome = await handleConflictingEmailClaim({ admin, userId: row.user_id, localDate, idempotencyKey: idempotencyKeyForEmail!, now });
+          if (outcome.kind === "sent") emailsSentCount++;
+          else if (outcome.kind === "failed") bumpReason(emailsFailedReasons, classifySendFailure({ error: outcome.error }));
+          else bumpReason(skippedReasons, conflictSkipReasonCode(outcome.reason));
+          continue;
+        }
+        if (claimed?.status !== "claimed" || typeof claimed.deliveryId !== "number") { bumpReason(failedReasons, "seed_pool_changed"); continue; }
+        claimedRowId = claimed.deliveryId;
+      } else if (isDigestDedupeEnabled()) {
         // F-A-P4-07: claim today's row through the atomic RPC (see the
         // migration) instead of a plain insert, so two overlapping
         // invocations for the same user/local-date can never both "win".
@@ -666,6 +697,7 @@ export async function GET(req: NextRequest) {
                   originUrl,
                   idempotencyKey: idempotencyKeyForEmail,
                   emptyReasonCode: feed.meta.emptyReasonCode,
+                  ...(seedContext.kind === "ready" && seedContext.version !== "none" ? { seedFence: { ownerId: row.user_id, localDate: seedContext.localDate, expectedVersion: seedContext.version, expectedRevocationGeneration: seedContext.revocationGeneration, deliveryId: claimedRowId } } : {}),
                 })
               : await sendDigestEmail({
                   to,
