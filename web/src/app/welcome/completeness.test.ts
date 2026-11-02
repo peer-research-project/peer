@@ -34,12 +34,13 @@ describe("stepIndexFromKey", () => {
 
 describe("STEP_META", () => {
   // OWN-KEY lane 4: Account joined, first. Still no Data step.
-  it("has Account then six steps and no Data step (the events and jobs data sources are stopped)", () => {
+  it("has the optional seed step after Work and no Data step (the events and jobs data sources are stopped)", () => {
     expect(STEP_META.map((m) => m.key)).toEqual([
       "account",
       "basics",
       "topics",
       "work",
+      "seed",
       "radar",
       "ai",
       "persona",
@@ -167,18 +168,19 @@ describe("firstIncompleteStep", () => {
       researchTopics: ["solid state battery"],
       currentProject: "electrolyte modelling",
     });
+    // The optional seed step does not prevent resuming on radar.
     // basics, topics, work done → open on radar. The work-rights step that
     // used to sit between basics and topics is gone.
     // OWN-KEY lane 4: Account now comes first, so this is asked for a signed-in
     // reader (Account done: radar is index 4) and where sign-in is not
     // configured (no Account step: radar is index 3, as before).
-    expect(firstIncompleteStep(p, false, "signed-in")).toBe(4);
-    expect(firstIncompleteStep(p, false, "unconfigured")).toBe(3);
+    expect(firstIncompleteStep(p, false, "signed-in")).toBe(5);
+    expect(firstIncompleteStep(p, false, "unconfigured")).toBe(4);
     // L4-fix (R13, D3) — CHANGED: this was "a signed-out reader is offered
     // Account first, however much else is done" (index 0). A returning
     // reader now resumes where the wizard opened before Account existed:
     // radar, index 4 of the visible list.
-    expect(firstIncompleteStep(p, false, "signed-out")).toBe(4);
+    expect(firstIncompleteStep(p, false, "signed-out")).toBe(5);
   });
 
   it("a fully set-up profile lands on the last step, not past the end", () => {
@@ -212,7 +214,7 @@ describe("the Account step", () => {
   });
 
   it("is left out entirely where sign-in is not configured, the rest in order", () => {
-    expect(keys("unconfigured")).toEqual(["basics", "topics", "work", "radar", "ai", "persona"]);
+    expect(keys("unconfigured")).toEqual(["basics", "topics", "work", "seed", "radar", "ai", "persona"]);
   });
 
   it("is done only when signed in", () => {
@@ -224,9 +226,9 @@ describe("the Account step", () => {
 
   it("deep links resolve on the visible list: ?step=account where sign-in exists, nothing where it does not", () => {
     expect(stepIndexFromKey("account", visibleSteps("signed-out"))).toBe(0);
-    expect(stepIndexFromKey("ai", visibleSteps("signed-out"))).toBe(5);
+    expect(stepIndexFromKey("ai", visibleSteps("signed-out"))).toBe(6);
     expect(stepIndexFromKey("account", visibleSteps("unconfigured"))).toBeNull();
-    expect(stepIndexFromKey("ai", visibleSteps("unconfigured"))).toBe(4);
+    expect(stepIndexFromKey("ai", visibleSteps("unconfigured"))).toBe(5);
     expect(stepIndexFromKey("basics", visibleSteps("unconfigured"))).toBe(0);
   });
 
@@ -278,7 +280,7 @@ describe("the Account step", () => {
 
     /** The rule before Account existed, over the six steps it had. */
     const before = (p: UserProfile, persona: boolean, auth: "signed-out" | "unknown" | "signed-in") => {
-      const six = STEP_META.filter((m) => m.key !== "account");
+      const six = STEP_META.filter((m) => m.key !== "account" && m.key !== "seed");
       const j = six.findIndex((m) => !isStepDone(m.key, p, persona, auth));
       return j === -1 ? six[six.length - 1].key : six[j].key;
     };

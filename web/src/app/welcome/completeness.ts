@@ -13,6 +13,7 @@ export type StepKey =
   | "basics"
   | "topics"
   | "work"
+  | "seed"
   | "radar"
   | "ai"
   | "persona";
@@ -35,6 +36,7 @@ export const STEP_META: StepMeta[] = [
   { key: "basics", label: "Basics" },
   { key: "topics", label: "Topics" },
   { key: "work", label: "Work" },
+  { key: "seed", label: "Seed papers" },
   { key: "radar", label: "Radar" },
   { key: "ai", label: "AI" },
   { key: "persona", label: "Persona" },
@@ -126,6 +128,9 @@ export function isStepDone(
           profile.advisorName ||
           profile.advisorAuthorId,
       );
+    case "seed":
+      // Server-owned optional data is not inferred from the local profile.
+      return false;
     case "radar":
       return (
         RADAR_FIELDS.some((f) => profile[f] !== defaultProfile[f]) ||
@@ -180,7 +185,7 @@ export function firstIncompleteStep(
 ): number {
   const steps = visibleSteps(auth);
   const undone = (m: StepMeta) => !isStepDone(m.key, profile, personaDone, auth);
-  const others = steps.filter((m) => m.key !== "account");
+  const others = steps.filter((m) => m.key !== "account" && m.key !== "seed");
   const started = others.some((m) => !undone(m));
   const next = (started ? others : steps).find(undone);
   return next ? steps.indexOf(next) : steps.length - 1;

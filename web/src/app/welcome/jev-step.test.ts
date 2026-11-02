@@ -67,13 +67,14 @@ describe("welcome wizard - the Jev block", () => {
 
   // OWN-KEY lane 4: the list gained Account, first (a key runs only while the
   // reader is signed in). The property here is unchanged: Jev has no step.
-  it("adds no wizard step: the steps are the ones that were there (Account first), less the retired Data step", () => {
+  it("adds no Jev step; the optional seed step is separately authorized", () => {
     expect(STEP_META.map((step) => step.key)).not.toContain("jev");
     expect(STEP_META.map((step) => step.key)).toEqual([
       "account",
       "basics",
       "topics",
       "work",
+      "seed", // Optional seed papers; Jev and Data remain absent.
       "radar",
       "ai",
       "persona",

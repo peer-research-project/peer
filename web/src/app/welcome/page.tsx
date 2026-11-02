@@ -45,6 +45,7 @@ import {
 } from "@/components/profile/ai-setup";
 import { SchoolAutocomplete } from "@/components/profile/school-autocomplete";
 import { AdvisorField } from "@/components/profile/advisor-field";
+import { SeedPool } from "@/components/seed-pool/seed-pool";
 import { JevSetup } from "@/components/profile/jev-setup";
 import { useProfileSettled } from "@/components/first-run";
 import { Callout } from "@/components/ui";
@@ -76,6 +77,7 @@ const STEP_STORY: Record<StepKey, string> = {
   basics: "A little more you.\nA lot less noise.",
   topics: "Follow what\nmakes you curious.",
   work: "Make space for\nyour big questions.",
+  seed: "Papers that\ninspire you.",
   radar: "Your field,\nyour way.",
   ai: "A little help\nwhen you need it.",
   persona: "Every curious mind\nis different.",
@@ -402,6 +404,13 @@ export default function WelcomePage() {
                 </StepFrame>
               )}
 
+              {key === "seed" && (
+                <StepFrame kicker="Optional" title="Choose seed papers" subtitle="A few papers can help shape your briefing.">
+                  <SeedPool onboarding />
+                  <button type="button" onClick={next} className="mt-4 underline">Skip seed papers</button>
+                </StepFrame>
+              )}
+
               {key === "radar" && (
                 <StepFrame
                   kicker="Tuning"
@@ -710,6 +719,8 @@ function summarizeStep(
       ].filter(Boolean);
       return parts.length > 0 ? parts.join(" · ") : "Not filled in";
     }
+    case "seed":
+      return "Optional — manage in Profile";
     case "radar":
       return isStepDone("radar", profile, false) ? "Customized" : "Defaults";
     case "ai":

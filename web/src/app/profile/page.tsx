@@ -24,6 +24,7 @@ import { AdvisorField } from "@/components/profile/advisor-field";
 import { StandingQuestionsField } from "@/components/profile/standing-questions-field";
 import { STANDING } from "@/components/reader/copy";
 import { summarizePreferenceLedger } from "@/lib/preferences/ledger";
+import { SeedPool } from "@/components/seed-pool/seed-pool";
 import { ProfileUploads } from "@/components/profile-uploads";
 import { apiFetch } from "@/lib/api";
 import { SURFACE_TOPIC_DESCRIPTIONS } from "@/lib/profile/topic-copy";
@@ -251,6 +252,11 @@ export default function ProfilePage() {
           updateIndustryPreference={updateIndustryPreference}
         />
         )}
+      </section>
+
+      <section id="seed-pool" className="profile-section">
+        <div className="profile-section-header"><div><h2>Seed Paper Pool</h2><p>Papers that help shape your briefing.</p></div></div>
+        <SeedPool />
       </section>
 
       <section id="reading-activity" className="profile-section">
