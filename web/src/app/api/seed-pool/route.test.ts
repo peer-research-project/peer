@@ -46,10 +46,19 @@ describe("private seed pool API", () => {
     expect(mocks.remove).not.toHaveBeenCalled();
   });
   it("keeps an unsettled writer's tombstone even after its cleanup time", async () => {
-    mocks.forget.mockResolvedValue({ status: "revoked", revision: 1, objects: [{ id, writerSettled: false, cleanupAfter: new Date(Date.now() - 60_000).toISOString() }] });
+    const { createHash } = await import("node:crypto");
+    const key = createHash("sha256").update(`account:${owner}`).digest("hex");
+    mocks.forget.mockResolvedValue({ status: "revoked", revision: 1, objects: [{ id, objectName: `seed-pool/${key}/${id}.pdf`, writerSettled: false, cleanupAfter: new Date(Date.now() - 60_000).toISOString() }] });
     const response = await DELETE(new Request("http://localhost", { method: "DELETE", body: JSON.stringify({ expectedRevision: 0 }) }), { params: Promise.resolve({ id }) });
     expect(response.status).toBe(503);
     expect(mocks.remove).not.toHaveBeenCalled();
+  });
+
+  it("never reports forget success without a cleanup target", async () => {
+    mocks.forget.mockResolvedValue({ status: "revoked", revision: 1, objects: [] });
+    const response = await DELETE(new Request("http://localhost", { method: "DELETE", body: JSON.stringify({ expectedRevision: 0 }) }), { params: Promise.resolve({ id }) });
+    expect(response.status).toBe(503);
+    expect(mocks.cleanup).not.toHaveBeenCalled();
   });
 
 });

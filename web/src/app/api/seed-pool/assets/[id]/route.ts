@@ -19,7 +19,7 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
   if (!result) return reply({ error: "Seed papers are unavailable." }, 503);
   if (result.status === "stale_revision") return reply(result, 409);
   if (result.status === "not_found") return reply({ error: "Seed paper not found." }, 404);
-  if (result.status !== "revoked" || !Array.isArray(result.objects)) return reply({ error: "Seed papers are unavailable." }, 503);
+  if (result.status !== "revoked" || !Array.isArray(result.objects) || result.objects.length === 0) return reply({ error: "Seed papers are unavailable." }, 503);
   // Revocation and snapshot scrub already committed under the owner lock.
   // Keep tombstones on any storage failure; a retry resumes cleanup.
   if (result.objects.some((entry) => !entry || typeof entry !== "object" || entry.writerSettled !== true || typeof entry.cleanupAfter !== "string" || !Number.isFinite(Date.parse(entry.cleanupAfter)) || Date.parse(entry.cleanupAfter) > Date.now())) return reply({ status: "cleanup_pending", revision: result.revision }, 503);

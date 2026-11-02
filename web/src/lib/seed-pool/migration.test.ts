@@ -27,4 +27,12 @@ describe("seed migration source invariants (not a PostgreSQL runtime test)", () 
     expect(fnBody).toContain("payload='{}'::jsonb,item_ids='{}'::text[]");
     expect(fnBody).not.toMatch(/delete\s+from\s+public\.(notes|saved_papers)/i);
   });
+  it("fences seeded private cache writes against revoked versions", () => {
+    const fnBody = body("seed_pool_put_private_pool");
+    expect(fnBody).toContain("seed_pool_fence_matches");
+    expect(fnBody.indexOf("seed_pool_fence_matches")).toBeLessThan(fnBody.indexOf("insert into public.private_paper_pools"));
+    expect(fnBody).toContain("pg_advisory_xact_lock");
+    expect(fnBody).toContain("p_expected_revocation_generation");
+  });
+
 });
