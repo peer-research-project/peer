@@ -1,6 +1,6 @@
 # Upload / source truth / Notes product rubric
 
-Target: provisional97.9% in EACH theme for TWO consecutive independently scored rounds; user choice pending. Ruling changes only in repair state. No exclusions presently authorized.
+Target: user-confirmed97.9% in EACH theme for TWO consecutive independently scored rounds. Ruling changes only in repair state. No exclusions presently authorized.
 
 Each unit is1. PASS count is number fully satisfied. Defect cost: unusable1.0; misleading0.5; cosmetic0.25. Score=max(0,100*(PASS-costs)/units). Unrun units are not PASS. Hard requirements (source honesty, authentication, ownership, no private shared state, no unsupported model generation) hold regardless of percentage. Show fixture and actual-input scores separately; show each actual paper individually.
 
