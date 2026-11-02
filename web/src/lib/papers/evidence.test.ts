@@ -1049,3 +1049,17 @@ it("removes unsupported plain summaries and novelty when there is no corpus", ()
   expect(verified.whatItProposes.newHere).toBeUndefined();
   expect(verified.resultsAndSignificance.summary).toBe("");
 });
+
+
+it("withholds block prose when a nonempty source supports only some claims", () => {
+  const invalid = "Invented evidence that does not occur in this source.";
+  const input = report({
+    whatItProposes: { summary: "Invented proposal", newHere: ["Invented novelty"], methods: [{ text: "made up", evidence: invalid }] },
+    resultsAndSignificance: { summary: "Invented findings", keyResults: [{ title: "good", detail: "good", evidence: ABSTRACT_SENTENCE }, { title: "bad", detail: "bad", evidence: invalid }] },
+  });
+  const verified = verifyReportEvidence(input, { abstract }).report;
+  expect(verified.whatItProposes.summary).toBe("");
+  expect(verified.whatItProposes.newHere).toBeUndefined();
+  expect(verified.resultsAndSignificance.summary).toContain(ABSTRACT_SENTENCE);
+  expect(verified.resultsAndSignificance.keyResults).toHaveLength(1);
+});
