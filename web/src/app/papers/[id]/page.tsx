@@ -570,7 +570,7 @@ export default function PaperReadingPage({
     apiFetch<Paper>(
       isUploadId
         ? `/api/papers/upload/${encodeURIComponent(id.slice("upload:".length))}`
-        : `/api/papers/${encodeURIComponent(id)}`,
+        : `/api/papers/${encodeURIComponent(id)}?sourceVersion=2`,
       controller ? { signal: controller.signal } : undefined,
     )
       .then((p) => {
@@ -1555,7 +1555,7 @@ function Reader({
             {!hasBody && reading.abstract.sentences.length === 0 && !report?.skim?.length && (
               <div className="border-l-2 border-accent pl-4 py-1">
                 <h2 className="text-title font-medium text-heading">No abstract available</h2>
-                <p className="mt-2 max-w-[48ch] text-body leading-relaxed text-text-muted">Peer could not find an abstract for this paper. Open the source to read the original record.</p>
+                <p className="mt-2 max-w-[48ch] text-body leading-relaxed text-text-muted">{paper?.abstractRetrieval?.status === "blocked" ? (paper.abstractRetrieval.attempts.some((attempt) => attempt.httpStatus === 451) ? "A source restricted access for legal reasons. Open the source to read the original record." : paper.abstractRetrieval.attempts.some((attempt) => attempt.httpStatus === 401) ? "A source requires authentication to retrieve the abstract. Open the source to read the original record." : "A source blocked the abstract request. Open the source to read the original record.") : paper?.abstractRetrieval?.status === "transient" ? "Abstract retrieval was temporarily unavailable. Try again later or open the source." : "Peer could not retrieve an abstract for this paper. Open the source to read the original record."}</p>
               </div>
             )}
             <PaperWords

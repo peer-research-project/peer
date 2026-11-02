@@ -68,6 +68,7 @@ export interface RawItem {
    */
   admissionChannels?: FeedAdmissionChannel[];
   metadata: {
+    abstractRetrieval?: import("@/lib/papers/enrich").AbstractRetrieval;
     citationCount?: number;
     doi?: string;
     semanticScholarId?: string;

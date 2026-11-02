@@ -21,5 +21,5 @@ export async function GET(
   // A paper resolved by id was not recommended; the reading page knows this
   // string and never shows it as a reason.
   const paper = rawItemToPaper(raw, { relevanceReason: DEEP_LINK_REASON });
-  return NextResponse.json(paper, { headers: CACHE_HEADERS });
+  return NextResponse.json(paper, { headers: ["transient", "blocked"].includes(paper.abstractRetrieval?.status ?? "") ? { "Cache-Control": "no-store" } : CACHE_HEADERS });
 }

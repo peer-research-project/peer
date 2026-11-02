@@ -161,6 +161,6 @@ export async function GET(
   const reading = buildReading(paper, fullText.settled ? fullText.result : null);
   const availability = fullText.settled ? readabilityOf(fullText.result) : "unknown";
   return NextResponse.json(reading, {
-    headers: { ...(availability !== "unknown" && !refresh ? CACHE_HEADERS : NO_STORE_HEADERS), "X-Peer-Readability": availability },
+    headers: { ...(availability !== "unknown" && !refresh && !["transient", "blocked"].includes(paper.abstractRetrieval?.status ?? "") ? CACHE_HEADERS : NO_STORE_HEADERS), "X-Peer-Readability": availability },
   });
 }

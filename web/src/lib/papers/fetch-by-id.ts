@@ -5,7 +5,7 @@ import {
   type OpenAlexWork,
 } from "@/lib/utils/openalex";
 import { cleanDisplayText, cleanDisplayTextOrUndefined } from "@/lib/text/clean";
-import { fetchSemanticScholarText } from "./enrich";
+import { retrieveAbstract } from "./enrich";
 import { fetchSemanticScholar } from "@/lib/sources/semantic-scholar-client";
 import { paperToRawItem, type S2Paper } from "@/lib/sources/semantic-scholar";
 
@@ -22,28 +22,11 @@ async function fetchOpenAlexPaper(workId: string): Promise<RawItem | null> {
     const work = (await res.json()) as OpenAlexWork;
     const item = openAlexWorkToRawItem(work);
 
-    // Publishers like Nature / Science don't license abstracts to OpenAlex.
-    // Fill in via Semantic Scholar — try OpenAlex ID first, then DOI. Only a
-    // real abstract becomes `item.abstract`; the machine TLDR, when that is
-    // all S2 has, travels separately as `item.tldr` so the page can label it.
     if (!item.abstract) {
-      const externalIds = [`OpenAlex:${workId}`];
-      if (item.metadata.doi) {
-        const cleanedDoi = item.metadata.doi.replace(
-          /^https?:\/\/(?:dx\.)?doi\.org\//i,
-          "",
-        );
-        externalIds.push(`DOI:${cleanedDoi}`);
-      }
-      for (const externalId of externalIds) {
-        const found = await fetchSemanticScholarText(externalId);
-        if (!found) continue;
-        if (found.tldr && !item.tldr) item.tldr = found.tldr;
-        if (found.abstract) {
-          item.abstract = found.abstract;
-          break;
-        }
-      }
+      const result = await retrieveAbstract({ openalexId: workId, doi: item.metadata.doi, title: item.title });
+      if (result.abstract) item.abstract = result.abstract;
+      if (result.tldr) item.tldr = result.tldr;
+      item.metadata.abstractRetrieval = { status: result.status, source: result.source, attempts: result.attempts };
     }
     return item;
   } catch (err) {

@@ -112,6 +112,13 @@ describe("GET /api/papers/[id]/reading", () => {
     });
   });
 
+  it.each(["transient", "blocked"] as const)("does not cache an abstract retrieval %s", async (status) => {
+    mocks.fetchPaperById.mockResolvedValue({ ...zenodoItem, abstract: undefined, metadata: { ...zenodoItem.metadata, abstractRetrieval: { status, attempts: [] } } });
+    mocks.getFullText.mockResolvedValue(zenodoFullText);
+    const res = await call("openalex:W7208807247");
+    expect(res.headers.get("cache-control")).toBe("no-store");
+  });
+
   it("caches a settled no-full-text outcome too — it is a fact about the paper", async () => {
     mocks.fetchPaperById.mockResolvedValue(zenodoItem);
     mocks.getFullText.mockResolvedValue({
