@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { CachedPaperPool, PoolCache } from "./pool-cache";
 import { PAPER_POOL_KEY_PREFIX } from "./pool-cache";
+import { putSeedPrivatePool, type SeedBatchFence } from "@/lib/seed-pool/server";
 import { serializeFeedIntent, type NormalizedFeedIntent } from "@/lib/feed/intent";
 
 /**
@@ -170,5 +171,18 @@ export class PrivatePaperPoolCache implements PoolCache {
     } catch {
       // A private-cache outage falls through to a request-local fresh build.
     }
+  }
+}
+
+
+/** Seed-derived membership and reasons are written under the pool mutation lock. */
+export class SeedFencedPaperPoolCache implements PoolCache {
+  constructor(private readonly readCache: PoolCache, private readonly fence: SeedBatchFence,
+    private readonly put = putSeedPrivatePool) {}
+  get(key: string) { return this.readCache.get(key); }
+  async set(key: string, pool: CachedPaperPool): Promise<void> {
+    if (!key.startsWith(PAPER_POOL_KEY_PREFIX) || pool.surface !== "papers") return;
+    // A failed/stale write stays request-local; publication is separately fenced.
+    await this.put({ ...this.fence, scopeKey: key, payload: pool });
   }
 }

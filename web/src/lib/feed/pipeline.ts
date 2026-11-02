@@ -38,6 +38,7 @@ import {
   ephemeralPaperPoolCache,
   isTrustedPaperCacheScope,
   PrivatePaperPoolCache,
+  SeedFencedPaperPoolCache,
   type TrustedPaperCacheScope,
 } from "@/lib/opportunities/private-paper-cache";
 import { uploadInterestTerms } from "@/lib/preferences/ledger";
@@ -1836,11 +1837,15 @@ export async function runFeedPipeline(
   // are request-local, and scoped requests use an owner-qualified store.
   if ((options.seedSnapshot || options.seedPoolVersion !== undefined) && !privateScope) throw new Error("Seed pool requires an owner-scoped paper cache");
   const seedPapers = (options.seedSnapshot?.seeds ?? []).filter(hasUsableSeed);
-  // Until the owner-locked cache write is available, never persist a pool
-  // built from seed material: a concurrent forget could otherwise resurrect it.
-  const cache = seedPapers.length ? ephemeralPaperPoolCache : privateScope
-    ? (options.cache ?? new PrivatePaperPoolCache(privateScope))
-    : ephemeralPaperPoolCache;
+  const seedVersion = options.seedPoolVersion ?? options.seedSnapshot?.version;
+  const seedGeneration = options.seedRevocationGeneration ?? options.seedSnapshot?.revocationGeneration;
+  if (seedPapers.length && (!privateScope || !seedVersion || !options.seedTargetLocalDate || !Number.isSafeInteger(seedGeneration))) {
+    throw new Error("Seed pool requires an owner, target date, version and revocation fence");
+  }
+  const baseCache = privateScope ? (options.cache ?? new PrivatePaperPoolCache(privateScope)) : ephemeralPaperPoolCache;
+  const cache = seedPapers.length && privateScope && seedVersion && options.seedTargetLocalDate && seedGeneration !== undefined
+    ? new SeedFencedPaperPoolCache(baseCache, { ownerId: privateScope.ownerId, localDate: options.seedTargetLocalDate, expectedVersion: seedVersion, expectedRevocationGeneration: seedGeneration })
+    : baseCache;
 
   // THE AI TIER IS PART OF THE KEY, unlike on the events and jobs surfaces.
   // A Tier-2 pool carries an LLM ranking a Tier-0 pool does not have, so the
@@ -1879,7 +1884,7 @@ export async function runFeedPipeline(
         aiOrder: built.aiOrder,
         aiReasons: built.aiReasons,
         generatedAt: built.generatedAt,
-        localDate: built.localDate,
+        localDate: options.seedTargetLocalDate ?? built.localDate,
         sourceStatus: built.sourceStatus,
         // P2-S6-FIX — F-A-P2S6-02. Threaded onto the PERSISTED pool object
         // (not just this response's own `diagnostics`), so a later same-day
