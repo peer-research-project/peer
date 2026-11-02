@@ -1,8 +1,32 @@
+import { createAdminClient } from "@/lib/supabase/admin";
+import { SeedPoolRepository, type SeedRpcOutcome } from "./repository";
 import type { ResolveSeedPoolOptions, SeedPoolResolution } from "./types";
 
-/** Server-only entry point. The owner is derived by the authenticated caller. */
-export async function resolveSeedPool(_ownerId: string, _options: ResolveSeedPoolOptions = {}): Promise<SeedPoolResolution> {
-  // Until the durable owner repository is available, fail closed. No caller
-  // may interpret a storage failure as an empty pool or accept client seeds.
-  return { status: "unavailable", ownerLocalDate: null, timezone: null, snapshot: null, revision: null };
+const unavailable = (): SeedPoolResolution => ({ status: "unavailable", ownerLocalDate: null, timezone: null, snapshot: null, revision: null, revocationGeneration: 0 });
+/** Server-only entry point. Owner comes from authenticated server state, never request JSON. */
+export async function resolveSeedPool(ownerId: string, options: ResolveSeedPoolOptions = {}): Promise<SeedPoolResolution> {
+  if (!ownerId) return unavailable();
+  try {
+    const repo = new SeedPoolRepository(createAdminClient());
+    const installed = await repo.installed();
+    if (installed === "missing") return { status: "none", ownerLocalDate: null, timezone: null, snapshot: null, revision: 0, revocationGeneration: 0 };
+    if (installed !== "yes") return unavailable();
+    return await repo.resolve(ownerId, options.targetLocalDate, options.now) ?? unavailable();
+  } catch { return unavailable(); }
+}
+export interface SeedBatchFence { ownerId: string; localDate: string; expectedVersion: string; expectedRevocationGeneration: number }
+export interface SeedBatchIdentity extends SeedBatchFence { batchId: string }
+export interface SeedPreparedBatch extends SeedBatchFence { intentVersion?: string; papers: unknown[]; servedItems: unknown[] }
+async function fence(name: "seed_pool_mark_batch_served" | "seed_pool_put_prepared_batch" | "seed_pool_ack_batch", args: Record<string, unknown>): Promise<SeedRpcOutcome | null> {
+  try { return await new SeedPoolRepository(createAdminClient()).outputFence(name, args); } catch { return null; }
+}
+const common = (input: SeedBatchFence) => ({ p_owner_id: input.ownerId, p_local_date: input.localDate, p_expected_version: input.expectedVersion, p_expected_revocation_generation: input.expectedRevocationGeneration });
+export function markSeedBatchServed(input: SeedBatchIdentity): Promise<SeedRpcOutcome | null> {
+  return fence("seed_pool_mark_batch_served", { ...common(input), p_batch_id: input.batchId });
+}
+export function ackSeedBatch(input: SeedBatchIdentity): Promise<SeedRpcOutcome | null> {
+  return fence("seed_pool_ack_batch", { ...common(input), p_batch_id: input.batchId });
+}
+export function putSeedPreparedBatch(input: SeedPreparedBatch): Promise<SeedRpcOutcome | null> {
+  return fence("seed_pool_put_prepared_batch", { ...common(input), p_intent_version: input.intentVersion ?? null, p_papers: input.papers, p_served_items: input.servedItems });
 }

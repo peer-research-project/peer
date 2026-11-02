@@ -21,6 +21,8 @@ export type SeedPoolResolution = {
   timezone: string | null;
   snapshot: SeedSnapshot | null;
   revision: number | null;
+  /** Monotonic privacy fence, including when no snapshot exists. */
+  revocationGeneration: number;
 };
 export interface ResolveSeedPoolOptions {
   /** Owner-local target date, including a future prepared job's date. */
