@@ -138,3 +138,9 @@ it("ignores a body cached under a different source fingerprint", () => {
   const storage = { getItem: (key: string) => key === "peer-reading-v4" ? JSON.stringify({ "p1|public||source:new": { ts: Date.now(), reading: { version: 19, sourceFingerprint: "old", body: [{ paragraphs: ["stale"] }] } } }) : null };
   expect(storedBodyOf("p1", storage)).toBeNull();
 });
+
+
+it("reads the current fingerprinted cache for note passages", () => {
+  const storage = { getItem: (key: string) => key === "peer-reading-v4" ? JSON.stringify({ "p1|public||source:abc": { ts: Date.now(), reading: { version: 19, sourceFingerprint: "abc", body: [{ paragraphs: ["current"] }] } } }) : null };
+  expect(storedBodyOf("p1", storage)).toEqual([{ paragraphs: ["current"] }]);
+});
