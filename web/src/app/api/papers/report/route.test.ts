@@ -526,9 +526,8 @@ describe("POST /api/papers/report JSON fallback", () => {
     const report = (await response.json()) as PaperReport;
 
     expect(response.headers.get("content-type")).toContain("application/json");
-    expect(report.whatItProposes.summary).toBe(
-      generatedReport.whatItProposes.summary,
-    );
+    expect(report.whatItProposes.summary).toContain(abstractSentence);
+    expect(report.whatItProposes.summary).not.toContain(generatedReport.whatItProposes.summary);
     expect(report.skim[0].text).toBe(generatedReport.skim[0].text);
     expect(report.provenance.basis).toBe("model-abstract");
     expect(generateJsonText).toHaveBeenCalledTimes(1);
