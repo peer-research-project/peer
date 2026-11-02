@@ -201,7 +201,7 @@ describe("publisher redirect safety", () => {
     }));
     const result = await retrieveAbstract({ doi: "10.1234/safe" });
     expect(result.abstract).toBe(abstract);
-    expect(calls.slice(-2).every((call) => call.redirect === "manual")).toBe(true);
+    expect(calls.every((call) => call.redirect === "manual")).toBe(true);
   });
 });
 

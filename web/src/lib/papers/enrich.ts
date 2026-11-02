@@ -141,7 +141,7 @@ async function boundedFetch(url: string, deadline: number): Promise<Response | n
 
 async function semanticText(id: string, deadline: number): Promise<{ value: SemanticScholarText | null; status: AbstractRetrievalStatus; httpStatus?: number }> {
   const url = `https://api.semanticscholar.org/graph/v1/paper/${encodeURIComponent(id)}?fields=abstract,tldr`;
-  const res = await fetchSemanticScholar(url, { cache: "no-store", headers: { Accept: "application/json" } }, ATTEMPT_MS, { deadline, maxRetries: 0 });
+  const res = await fetchSemanticScholar(url, { cache: "no-store", redirect: "manual", headers: { Accept: "application/json" } }, ATTEMPT_MS, { deadline, maxRetries: 0 });
   const status = statusOf(res);
   if (!res?.ok) return { value: null, status, httpStatus: res?.status };
   try {
