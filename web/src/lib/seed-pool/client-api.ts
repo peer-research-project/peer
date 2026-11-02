@@ -2,7 +2,7 @@
 import { supabase } from "@/lib/supabase/client";
 import { UPLOAD_RIGHTS_VERSION } from "@/lib/papers/upload-policy";
 import type { SeedPaper, SeedPoolResolution, SeedSnapshot } from "./types";
-export type SeedPoolEditor = SeedPoolResolution & { pending?: SeedSnapshot; availableAssets: SeedPaper[] };
+export type SeedPoolEditor = SeedPoolResolution & { pending?: SeedSnapshot; availableAssets: SeedPaper[]; cleanupPending: Array<{ id: string }> };
 export class SeedPoolRequestError extends Error {
   constructor(message: string, public readonly status: number, public readonly detail: unknown) { super(message); }
 }

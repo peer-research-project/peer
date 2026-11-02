@@ -242,6 +242,11 @@ begin
     select jsonb_agg(jsonb_build_object('id',a.id::text,'uploadId',a.upload_id,'canonicalKey',a.canonical_key,'contentHash',a.content_hash,'title',a.title,'features',a.features,'publicIds',a.public_ids) order by a.created_at)
     from public.seed_pool_assets a where a.owner_id=p_owner_id and a.status='ready'
   ),'[]'::jsonb));
+  -- Only opaque IDs are returned for retry; revoked text and features remain erased.
+  v_current := v_current || jsonb_build_object('cleanupPending',coalesce((
+    select jsonb_agg(jsonb_build_object('id',a.id::text) order by a.created_at)
+    from public.seed_pool_assets a where a.owner_id=p_owner_id and a.status='revoked' and not a.cleanup_complete
+  ),'[]'::jsonb));
   return v_current;
 end $$;
 revoke all on function public.seed_pool_editor(uuid) from public,anon,authenticated;

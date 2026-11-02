@@ -62,3 +62,21 @@ describe("private seed pool API", () => {
   });
 
 });
+
+
+it("returns owner-only pending cleanup IDs and retries after refresh with the current revision", async () => {
+  const { createHash } = await import("node:crypto");
+  const key = createHash("sha256").update(`account:${owner}`).digest("hex");
+  const objectName = `seed-pool/${key}/${id}.pdf`;
+  mocks.editor.mockResolvedValue({ status: "none", revision: 3, availableAssets: [], cleanupPending: [{ id }] });
+  const refreshed = await GET();
+  expect(refreshed.status).toBe(200);
+  expect(await refreshed.json()).toMatchObject({ revision: 3, cleanupPending: [{ id }] });
+  expect(mocks.editor).toHaveBeenCalledWith(owner);
+  mocks.forget.mockResolvedValue({ status: "revoked", revision: 3, revocationGeneration: 1, objects: [{ id, objectName, writerSettled: true, cleanupAfter: new Date(Date.now() - 1000).toISOString() }] });
+  mocks.remove.mockResolvedValue(undefined); mocks.cleanup.mockResolvedValue(true);
+  const retry = await DELETE(new Request("http://localhost", { method: "DELETE", body: JSON.stringify({ expectedRevision: 3 }) }), { params: Promise.resolve({ id }) });
+  expect(retry.status).toBe(200);
+  expect(mocks.forget).toHaveBeenCalledWith(owner, 3, id);
+  expect(mocks.cleanup).toHaveBeenCalledWith(owner, [id]);
+});

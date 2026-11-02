@@ -50,3 +50,12 @@ it("protects an earlier legacy digest on the owner's local day before first seed
   expect(fn).toMatch(/user_id=p_owner_id\s+and\s*\(local_date=v_today::text or \(local_date is null and \(delivered_at at time zone v_zone\)::date=v_today\)\)/i);
   expect(fn.indexOf("briefing_deliveries")).toBeLessThan(fn.indexOf("v_target :="));
 });
+
+
+it("exposes only owner-scoped opaque incomplete tombstones and retries at current revision", () => {
+  const editor = body("seed_pool_editor");
+  expect(editor).toMatch(/jsonb_build_object\('cleanupPending'[\s\S]*?jsonb_build_object\('id',a\.id::text\)[\s\S]*?a\.owner_id=p_owner_id and a\.status='revoked' and not a\.cleanup_complete/i);
+  const forget = body("seed_pool_forget");
+  expect(forget.indexOf("v_state.revision is distinct from p_expected_revision")).toBeLessThan(forget.indexOf("v_status='revoked'"));
+  expect(forget).toMatch(/where owner_id=p_owner_id and status='revoked' and canonical_key=v_key/i);
+});
