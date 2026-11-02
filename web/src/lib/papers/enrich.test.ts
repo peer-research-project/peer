@@ -96,7 +96,7 @@ describe("bounded abstract enrichment", () => {
   const abstract = "This invented study compares two methods and reports a measured improvement across a controlled set of experiments.";
   it("accepts citation metadata, ScholarlyArticle JSON-LD and an explicit section", () => {
     expect(publisherAbstract(`<meta content="${abstract}" name="citation_abstract">`)).toEqual({ text: abstract, source: "publisher_meta" });
-    expect(publisherAbstract(`<script type="application/ld+json">${JSON.stringify({ "@type": "ScholarlyArticle", abstract })}</script>`)).toEqual({ text: abstract, source: "publisher_jsonld" });
+    expect(publisherAbstract(`<script type="application/ld+json">${JSON.stringify({ "@type": "ScholarlyArticle", headline: "Target article", abstract })}</script>`, { title: "Target article" })).toEqual({ text: abstract, source: "publisher_jsonld" });
     expect(publisherAbstract(`<section id="abstract"><p>${abstract}</p></section>`)).toEqual({ text: abstract, source: "publisher_section" });
   });
   it("rejects generic descriptions, TLDR, unrelated JSON-LD and truncated text", () => {
@@ -189,5 +189,26 @@ describe("publisher redirect safety", () => {
     const result = await retrieveAbstract({ doi: "10.1234/safe" });
     expect(result.abstract).toBe(abstract);
     expect(calls.slice(-2).every((call) => call.redirect === "manual")).toBe(true);
+  });
+});
+
+describe("publisher JSON-LD identity", () => {
+  const related = "This invented unrelated research describes a different sample and a different set of experimental outcomes.";
+  const wanted = "This invented target research compares two samples and reports a measured effect across controlled experiments.";
+  const article = (doi: string, headline: string, abstract: string) => ({ "@type": "ScholarlyArticle", identifier: { "@type": "PropertyValue", value: doi }, headline, abstract });
+  const html = (nodes: unknown[]) => `<script type="application/ld+json">${JSON.stringify({ "@graph": nodes })}</script>`;
+  it("selects the requested article even when a related article appears first", () => {
+    const page = html([article("10.1234/other", "Related paper", related), article("10.1234/target", "Target paper", wanted)]);
+    expect(publisherAbstract(page, { doi: "10.1234/target", title: "Target paper" })).toEqual({ text: wanted, source: "publisher_jsonld" });
+  });
+  it("abstains when identity is unknown, conflicting, or ambiguous", () => {
+    const page = html([article("10.1234/other", "Related paper", related)]);
+    expect(publisherAbstract(page)).toBeNull();
+    expect(publisherAbstract(page, { doi: "10.1234/target", title: "Related paper" })).toBeNull();
+    expect(publisherAbstract(html([article("10.1234/target", "Target paper", wanted), article("10.1234/target", "Target paper", related)]), { doi: "10.1234/target" })).toBeNull();
+  });
+  it("accepts a unique matching title if the article has no DOI", () => {
+    const page = html([{ "@type": "ScholarlyArticle", headline: "Target paper", abstract: wanted }]);
+    expect(publisherAbstract(page, { title: "Target paper" })?.text).toBe(wanted);
   });
 });

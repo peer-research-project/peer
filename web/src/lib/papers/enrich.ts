@@ -51,30 +51,48 @@ function cleanAbstract(value: unknown): string | null {
 }
 
 /** Extract only fields explicitly identified as an abstract. Generic descriptions are not evidence. */
-export function publisherAbstract(html: string): { text: string; source: AbstractSource } | null {
+export function publisherAbstract(html: string, identity: { doi?: string; title?: string; url?: string } = {}): { text: string; source: AbstractSource } | null {
   for (const tag of html.match(/<meta\b[^>]*>/gi) ?? []) {
     const attrs = Object.fromEntries([...tag.matchAll(/([\w:-]+)\s*=\s*(["'])([\s\S]*?)\2/g)].map((m) => [m[1].toLowerCase(), m[3]]));
     if ((attrs.name ?? attrs.property ?? "").toLowerCase() !== "citation_abstract") continue;
     const text = cleanAbstract(attrs.content);
     if (text && text.length >= 60) return { text, source: "publisher_meta" };
   }
+  const articles: Record<string, unknown>[] = [];
+  const collect = (node: unknown): void => {
+    if (Array.isArray(node)) { node.forEach(collect); return; }
+    if (!node || typeof node !== "object") return;
+    const obj = node as Record<string, unknown>;
+    const types = Array.isArray(obj["@type"]) ? obj["@type"] : [obj["@type"]];
+    if (types.some((t) => typeof t === "string" && /(?:^|\/)ScholarlyArticle$/i.test(t))) articles.push(obj);
+    collect(obj["@graph"]);
+  };
   for (const match of html.matchAll(/<script\b[^>]*type\s*=\s*["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script\s*>/gi)) {
-    try {
-      const root: unknown = JSON.parse(match[1]);
-      const visit = (node: unknown): string | null => {
-        if (Array.isArray(node)) { for (const item of node) { const hit = visit(item); if (hit) return hit; } return null; }
-        if (!node || typeof node !== "object") return null;
-        const obj = node as Record<string, unknown>;
-        const types = Array.isArray(obj["@type"]) ? obj["@type"] : [obj["@type"]];
-        if (types.some((t) => typeof t === "string" && /(?:^|\/)ScholarlyArticle$/i.test(t))) {
-          const text = cleanAbstract(obj.abstract);
-          if (text && text.length >= 60) return text;
-        }
-        return visit(obj["@graph"]);
-      };
-      const text = visit(root);
-      if (text) return { text, source: "publisher_jsonld" };
-    } catch { /* malformed metadata is not an abstract */ }
+    try { collect(JSON.parse(match[1]) as unknown); } catch { /* malformed metadata */ }
+  }
+  const normalizeTitle = (value: unknown): string => typeof value === "string" ? cleanDisplayText(value).trim().replace(/\s+/g, " ").toLowerCase() : "";
+  const doiOf = (value: unknown): string | undefined => {
+    if (Array.isArray(value)) return value.map(doiOf).find(Boolean);
+    if (value && typeof value === "object") {
+      const obj = value as Record<string, unknown>;
+      return doiOf(obj.value) ?? doiOf(obj["@id"]);
+    }
+    if (typeof value !== "string") return undefined;
+    return value.match(/10\.\d{4,9}\/[\w.()/:;-]+/i)?.[0].toLowerCase();
+  };
+  const targetDoi = doiOf(identity.doi);
+  const targetTitle = normalizeTitle(identity.title);
+  const matching = articles.filter((article) => {
+    const articleDoi = doiOf(article.identifier) ?? doiOf(article.doi) ?? doiOf(article.url) ?? doiOf(article["@id"]);
+    if (targetDoi && articleDoi && targetDoi !== articleDoi) return false;
+    const doiMatch = !!targetDoi && articleDoi === targetDoi;
+    const titleMatch = !!targetTitle && normalizeTitle(article.headline ?? article.name) === targetTitle;
+    const urlMatch = !!identity.url && [article.url, article["@id"]].some((value) => value === identity.url);
+    return doiMatch || titleMatch || urlMatch;
+  });
+  if (matching.length === 1) {
+    const text = cleanAbstract(matching[0].abstract);
+    if (text && text.length >= 60) return { text, source: "publisher_jsonld" };
   }
   const section = html.match(/<section\b[^>]*(?:id|class)\s*=\s*["'][^"']*\babstract\b[^"']*["'][^>]*>([\s\S]*?)<\/section\s*>/i)?.[1]
     ?? html.match(/<h[1-4]\b[^>]*>\s*abstract\s*<\/h[1-4]\s*>([\s\S]*?)(?=<h[1-4]\b|<\/section\s*>)/i)?.[1];
@@ -168,7 +186,7 @@ export async function retrieveAbstract(opts: { openalexId?: string; arxivId?: st
             if (text) { attempts.push({ source, status: "found" }); return { status: "found", source: "crossref", abstract: text, tldr, attempts }; }
           } catch { status = "transient"; }
         } else {
-          const found = publisherAbstract(raw);
+          const found = publisherAbstract(raw, { doi: validDoi, title: opts.title, url: res.url || undefined });
           if (found && found.text.toLowerCase() !== opts.title?.trim().toLowerCase()) { attempts.push({ source, status: "found" }); return { status: "found", source: found.source, abstract: found.text, tldr, attempts }; }
         }
       }
