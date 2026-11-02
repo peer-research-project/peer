@@ -149,3 +149,45 @@ describe("bounded abstract enrichment", () => {
   });
 
 });
+
+describe("publisher redirect safety", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it.each([
+    "http://www.sciencedirect.com/article",
+    "https://127.0.0.1/private",
+    "https://169.254.169.254/latest/meta-data",
+    "https://localhost/private",
+    "https://unknown.example/article",
+    "https://sciencedirect.com.evil.example/article",
+    "https://user@www.sciencedirect.com/article",
+    "https://www.sciencedirect.com:443/article",
+    "https://www.sciencedirect.com:8443/article",
+  ])("rejects an unsafe target before requesting it: %s", async (target) => {
+    const calls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input); calls.push(url);
+      if (url.includes("semanticscholar.org")) return Response.json({ abstract: null });
+      if (url.includes("crossref.org")) return Response.json({ message: {} });
+      if (url.startsWith("https://doi.org/")) return new Response(null, { status: 302, headers: { location: target } });
+      throw new Error("Unexpected redirect fetch");
+    }));
+    const result = await retrieveAbstract({ doi: "10.1234/safe" });
+    expect(result.status).toBe("blocked");
+    expect(calls).toHaveLength(3);
+    expect(calls).not.toContain(target);
+  });
+  it("follows a bounded allowed redirect using manual mode", async () => {
+    const calls: Array<{ url: string; redirect?: RequestRedirect }> = [];
+    const abstract = "This invented study compares two methods and reports a measured improvement across a controlled set of experiments.";
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input); calls.push({ url, redirect: init?.redirect });
+      if (url.includes("semanticscholar.org")) return Response.json({ abstract: null });
+      if (url.includes("crossref.org")) return Response.json({ message: {} });
+      if (url.startsWith("https://doi.org/")) return new Response(null, { status: 302, headers: { location: "https://www.sciencedirect.com/article/example" } });
+      return new Response(`<meta name="citation_abstract" content="${abstract}">`);
+    }));
+    const result = await retrieveAbstract({ doi: "10.1234/safe" });
+    expect(result.abstract).toBe(abstract);
+    expect(calls.slice(-2).every((call) => call.redirect === "manual")).toBe(true);
+  });
+});

@@ -82,13 +82,45 @@ export function publisherAbstract(html: string): { text: string; source: Abstrac
   return text && text.length >= 60 ? { text, source: "publisher_section" } : null;
 }
 
-async function boundedFetch(url: string, deadline: number): Promise<Response | null> {
-  const remaining = deadline - Date.now();
-  if (remaining <= 0) return null;
+// Only these known public publishers and source APIs may receive requests from
+// enrichment. Validate each hop before fetching; a DOI redirect is untrusted.
+const TRUSTED_HOSTS = [
+  "doi.org", "api.crossref.org", "sciencedirect.com", "elsevier.com",
+  "nature.com", "springer.com", "springerlink.com", "wiley.com", "acs.org",
+  "tandfonline.com", "oup.com", "academic.oup.com", "cambridge.org",
+  "pnas.org", "science.org", "cell.com", "iop.org", "ieee.org",
+  "mdpi.com", "frontiersin.org", "plos.org", "biomedcentral.com",
+];
+const MAX_REDIRECTS = 4;
+function trustedUrl(raw: string): boolean {
   try {
-    return await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(Math.max(1, Math.min(ATTEMPT_MS, remaining))), headers: { "User-Agent": "PeerBot/0.1", Accept: "text/html,application/json" } });
-  } catch { return null; }
+    const url = new URL(raw);
+    const authority = raw.match(/^https:\/\/([^/?#]+)/i)?.[1] ?? "";
+    if (url.protocol !== "https:" || url.username || url.password || url.port || authority.includes(":")) return false;
+    const host = url.hostname.toLowerCase();
+    return TRUSTED_HOSTS.some((allowed) => host === allowed || host.endsWith(`.${allowed}`));
+  } catch { return false; }
 }
+async function boundedFetch(url: string, deadline: number): Promise<Response | null> {
+  let next = url;
+  for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects += 1) {
+    if (!trustedUrl(next)) return new Response(null, { status: 403 });
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return null;
+    try {
+      const res = await fetch(next, { redirect: "manual", cache: "no-store", signal: AbortSignal.timeout(Math.max(1, Math.min(ATTEMPT_MS, remaining))), headers: { "User-Agent": "PeerBot/0.1", Accept: "text/html,application/json" } });
+      if (![301, 302, 303, 307, 308].includes(res.status)) return res;
+      const location = res.headers.get("location");
+      await res.body?.cancel();
+      if (!location || redirects === MAX_REDIRECTS) return null;
+      try { next = new URL(location, next).href; } catch { return new Response(null, { status: 403 }); }
+      // Reject a user-specified port even if URL normalisation removes :443.
+      if (/^https:\/\/[^/?#]*:\d+(?:[/?#]|$)/i.test(location)) return new Response(null, { status: 403 });
+    } catch { return null; }
+  }
+  return null;
+}
+
 async function semanticText(id: string, deadline: number): Promise<{ value: SemanticScholarText | null; status: AbstractRetrievalStatus; httpStatus?: number }> {
   const url = `https://api.semanticscholar.org/graph/v1/paper/${encodeURIComponent(id)}?fields=abstract,tldr`;
   const res = await fetchSemanticScholar(url, { cache: "no-store", headers: { Accept: "application/json" } }, ATTEMPT_MS, { deadline, maxRetries: 0 });
