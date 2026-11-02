@@ -5,6 +5,10 @@ import { NextRequest } from "next/server";
 
 const mocks = vi.hoisted(() => ({
   resolveProvider: vi.fn(),
+  resolveSeedPool: vi.fn(),
+  putSeedPreparedBatch: vi.fn(),
+  markSeedBatchServed: vi.fn(),
+  recordSeedFeedServed: vi.fn(),
   runFeedPipeline: vi.fn(),
   requireAiRequest: vi.fn(),
   aiTierCeiling: vi.fn(),
@@ -29,6 +33,8 @@ const mocks = vi.hoisted(() => ({
   // none — see next/server's own `after.js`, which throws in that case).
   after: vi.fn(),
 }));
+
+vi.mock("@/lib/seed-pool/server", () => ({ resolveSeedPool: mocks.resolveSeedPool, putSeedPreparedBatch: mocks.putSeedPreparedBatch, markSeedBatchServed: mocks.markSeedBatchServed, recordSeedFeedServed: mocks.recordSeedFeedServed }));
 
 vi.mock("@/lib/llm/providers/registry", () => ({
   resolveProvider: mocks.resolveProvider,
@@ -159,6 +165,7 @@ function baseMeta() {
 // below ("/api/feed dashboard ledger exclusion").
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.resolveSeedPool.mockResolvedValue({ status: "none", schemaInstalled: false, ownerLocalDate: null, timezone: null, snapshot: null, revision: 0, revocationGeneration: 0 });
   mocks.runFeedPipeline.mockResolvedValue({ items: [], meta: {} });
   mocks.requireAiRequest.mockResolvedValue({ user: null, anonymous: true });
   mocks.aiTierCeiling.mockImplementation((tier, request) =>
@@ -1919,4 +1926,43 @@ describe("/api/feed Jev on the reader's own key", () => {
     }
     expect(source).toContain("parseJevApiKey(");
   });
+});
+
+
+it("records a no-seed owner-day observation and fails closed if activation races it", async () => {
+  vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://example.supabase.co");
+  vi.stubEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY", "public-test-key");
+  vi.stubEnv("PEER_DASHBOARD_LEDGER", "off");
+  mocks.getUser.mockResolvedValue({ data: { user: { id: "owner-seed-test" } } });
+  mocks.resolveSeedPool.mockResolvedValue({ status: "none", schemaInstalled: true, ownerLocalDate: "2026-11-02", timezone: "America/Chicago", snapshot: null, revision: 0, revocationGeneration: 0 });
+  mocks.recordSeedFeedServed.mockResolvedValue({ status: "stale_pool" });
+  const response = await GET(new NextRequest("http://localhost/api/feed?topics=battery"));
+  expect(response.status).toBe(503);
+  expect(mocks.recordSeedFeedServed).toHaveBeenCalledWith(expect.objectContaining({ ownerId: "owner-seed-test", localDate: "2026-11-02", expectedVersion: "none", expectedRevocationGeneration: 0 }));
+  expect(mocks.SupabaseDashboardDeliveryLedgerCtor).not.toHaveBeenCalled();
+});
+
+
+it("builds, atomically serves, and rechecks the server-selected seed snapshot", async () => {
+  vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://example.supabase.co");
+  vi.stubEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY", "public-test-key");
+  vi.stubEnv("PEER_DASHBOARD_LEDGER", "off");
+  mocks.getUser.mockResolvedValue({ data: { user: { id: "owner-seed-test" } } });
+  const snapshot = { version: "server-v", effectiveLocalDate: "2026-11-02", revocationGeneration: 1, seeds: [{ id: "s1", uploadId: "seed:s1", contentHash: "a".repeat(64), canonicalKey: "doi:test", title: "seed", features: { topic: ["forest canopy"], object: [], method: [] } }] };
+  mocks.resolveSeedPool.mockResolvedValue({ status: "ready", schemaInstalled: true, ownerLocalDate: "2026-11-02", timezone: "America/Chicago", snapshot, revision: 1, revocationGeneration: 1 });
+  const item = scoredItem("new-paper");
+  mocks.runFeedPipeline.mockResolvedValue({ items: [item], meta: baseMeta() });
+  const identity = identityForRawItem(item);
+  mocks.getBatch.mockResolvedValueOnce(null).mockResolvedValueOnce({ id: "batch", ownerId: "owner-seed-test", localDate: "2026-11-02", status: "served", papers: [identity], servedItems: [item], createdAt: "2026-11-02T00:00:00Z", seedPoolVersion: "server-v", seedRevocationGeneration: 1 });
+  mocks.readExclusions.mockResolvedValue({ status: "ok", keys: new Set() });
+  mocks.SupabaseDashboardDeliveryLedgerCtor.mockImplementation(function () { return { getBatch: mocks.getBatch, readExclusions: mocks.readExclusions }; });
+  mocks.SupabaseRolloverCandidateStoreCtor.mockImplementation(function () { return { list: vi.fn().mockResolvedValue([]), upsert: vi.fn() }; });
+  mocks.putSeedPreparedBatch.mockResolvedValue({ status: "prepared", batchId: "batch" });
+  mocks.markSeedBatchServed.mockResolvedValue({ status: "served" });
+  const response = await POST(request({ topics: ["battery"], seedSnapshot: { version: "forged" }, seedPoolVersion: "forged" }));
+  expect(response.status).toBe(200);
+  expect(mocks.putSeedPreparedBatch).toHaveBeenCalledWith(expect.objectContaining({ ownerId: "owner-seed-test", expectedVersion: "server-v", expectedRevocationGeneration: 1 }));
+  expect(mocks.markSeedBatchServed).toHaveBeenCalledWith(expect.objectContaining({ expectedVersion: "server-v", batchId: "batch" }));
+  expect(mocks.runFeedPipeline.mock.calls[0][1]).toMatchObject({ seedSnapshot: snapshot, seedPoolVersion: "server-v" });
+  expect(mocks.resolveSeedPool).toHaveBeenCalledTimes(2);
 });

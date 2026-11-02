@@ -560,6 +560,15 @@ export class SupabaseDashboardDeliveryLedger implements DashboardDeliveryLedger 
     }
   }
 
+  /** A retry can cross midnight: resolve the batch date by owner and ID. */
+  async getBatchById(ownerId: string, batchId: string): Promise<DashboardBatch | null> {
+    if (!this.client) return null;
+    try {
+      const { data, error } = await this.client.from("dashboard_batches").select("*").eq("owner_id", ownerId).eq("id", batchId).maybeSingle();
+      return error || !data ? null : rowToBatch(data);
+    } catch { return null; }
+  }
+
   async getBatch(ownerId: string, localDate: string): Promise<DashboardBatch | null> {
     if (!this.client) return this.fallback.getBatch(ownerId, localDate);
     try {
