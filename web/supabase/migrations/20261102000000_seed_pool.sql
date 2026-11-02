@@ -102,7 +102,8 @@ begin
   if v_count <> v_distinct or v_count <> v_hashes then return jsonb_build_object('status','duplicate'); end if;
   select exists(select 1 from public.seed_pool_snapshots where owner_id=p_owner_id and not superseded and effective_date<=v_today) into v_active;
   select exists(select 1 from public.dashboard_batches where owner_id=p_owner_id and local_date=v_today::text and status in ('served','acknowledged'))
-    or exists(select 1 from public.briefing_deliveries where user_id=p_owner_id and local_date=v_today::text)
+    or exists(select 1 from public.briefing_deliveries where user_id=p_owner_id and
+      (local_date=v_today::text or (local_date is null and (delivered_at at time zone v_zone)::date=v_today)))
     or exists(select 1 from public.seed_pool_observed_days where owner_id=p_owner_id and local_date=v_today) into v_served;
   v_target := case when not v_active and not v_served and v_count>0 then v_today else v_today+1 end;
   if v_state.pending_version is not null and v_state.pending_effective>v_today then

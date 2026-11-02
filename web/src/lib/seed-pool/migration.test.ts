@@ -43,3 +43,10 @@ describe("seed migration source invariants (not a PostgreSQL runtime test)", () 
   });
 
 });
+
+
+it("protects an earlier legacy digest on the owner's local day before first seed activation", () => {
+  const fn = body("seed_pool_apply");
+  expect(fn).toMatch(/user_id=p_owner_id\s+and\s*\(local_date=v_today::text or \(local_date is null and \(delivered_at at time zone v_zone\)::date=v_today\)\)/i);
+  expect(fn.indexOf("briefing_deliveries")).toBeLessThan(fn.indexOf("v_target :="));
+});
