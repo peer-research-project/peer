@@ -161,6 +161,7 @@ describe("publisher redirect safety", () => {
     "https://sciencedirect.com.evil.example/article",
     "https://user@www.sciencedirect.com/article",
     "https://www.sciencedirect.com:443/article",
+    "//www.sciencedirect.com:443/article",
     "https://www.sciencedirect.com:8443/article",
   ])("rejects an unsafe target before requesting it: %s", async (target) => {
     const calls: string[] = [];
@@ -175,6 +176,18 @@ describe("publisher redirect safety", () => {
     expect(result.status).toBe("blocked");
     expect(calls).toHaveLength(3);
     expect(calls).not.toContain(target);
+  });
+  it("stops a cycle at the redirect limit", async () => {
+    const calls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input); calls.push(url);
+      if (url.includes("semanticscholar.org")) return Response.json({ abstract: null });
+      if (url.includes("crossref.org")) return Response.json({ message: {} });
+      return new Response(null, { status: 302, headers: { location: "https://doi.org/10.1234/loop" } });
+    }));
+    const result = await retrieveAbstract({ doi: "10.1234/loop" });
+    expect(result.status).toBe("transient");
+    expect(calls.filter((url) => url.startsWith("https://doi.org/"))).toHaveLength(5);
   });
   it("follows a bounded allowed redirect using manual mode", async () => {
     const calls: Array<{ url: string; redirect?: RequestRedirect }> = [];

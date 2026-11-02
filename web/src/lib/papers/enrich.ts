@@ -133,7 +133,7 @@ async function boundedFetch(url: string, deadline: number): Promise<Response | n
       if (!location || redirects === MAX_REDIRECTS) return null;
       try { next = new URL(location, next).href; } catch { return new Response(null, { status: 403 }); }
       // Reject a user-specified port even if URL normalisation removes :443.
-      if (/^https:\/\/[^/?#]*:\d+(?:[/?#]|$)/i.test(location)) return new Response(null, { status: 403 });
+      if (/^(?:https?:)?\/\/[^/?#]*:\d+(?:[/?#]|$)/i.test(location.replace(/\\/g, "/"))) return new Response(null, { status: 403 });
     } catch { return null; }
   }
   return null;
