@@ -19,7 +19,7 @@ export async function resolveSeedPool(ownerId: string, options: ResolveSeedPoolO
 export interface SeedBatchFence { ownerId: string; localDate: string; expectedVersion: string; expectedRevocationGeneration: number }
 export interface SeedBatchIdentity extends SeedBatchFence { batchId: string }
 export interface SeedPreparedBatch extends SeedBatchFence { intentVersion?: string; papers: unknown[]; servedItems: unknown[] }
-async function fence(name: "seed_pool_mark_batch_served" | "seed_pool_put_prepared_batch" | "seed_pool_ack_batch", args: Record<string, unknown>): Promise<SeedRpcOutcome | null> {
+async function fence(name: "seed_pool_mark_batch_served" | "seed_pool_put_prepared_batch" | "seed_pool_ack_batch" | "seed_pool_claim_digest" | "seed_pool_validate_digest_send" | "seed_pool_record_feed_served", args: Record<string, unknown>): Promise<SeedRpcOutcome | null> {
   try { return await new SeedPoolRepository(createAdminClient()).outputFence(name, args); } catch { return null; }
 }
 const common = (input: SeedBatchFence) => ({ p_owner_id: input.ownerId, p_local_date: input.localDate, p_expected_version: input.expectedVersion, p_expected_revocation_generation: input.expectedRevocationGeneration });
@@ -31,4 +31,20 @@ export function ackSeedBatch(input: SeedBatchIdentity): Promise<SeedRpcOutcome |
 }
 export function putSeedPreparedBatch(input: SeedPreparedBatch): Promise<SeedRpcOutcome | null> {
   return fence("seed_pool_put_prepared_batch", { ...common(input), p_intent_version: input.intentVersion ?? null, p_papers: input.papers, p_served_items: input.servedItems });
+}
+
+/** Claim is fenced in the same owner transaction as pool edits. */
+export interface SeedDigestClaim extends SeedBatchFence { channel: string; itemIds: string[]; payload: unknown }
+export interface SeedDigestSend extends SeedBatchFence { deliveryId: number }
+export function claimSeedDigest(input: SeedDigestClaim): Promise<SeedRpcOutcome | null> {
+  return fence("seed_pool_claim_digest", { ...common(input), p_channel: input.channel, p_item_ids: input.itemIds, p_payload: input.payload });
+}
+/** Recheck immediately before an external send/retry. A provider call already in flight cannot be recalled. */
+export function validateSeedDigestSend(input: SeedDigestSend): Promise<SeedRpcOutcome | null> {
+  return fence("seed_pool_validate_digest_send", { ...common(input), p_delivery_id: input.deliveryId });
+}
+
+/** Records only an owner/date marker under the same fence; no candidate payload. */
+export function recordSeedFeedServed(input: SeedBatchFence): Promise<SeedRpcOutcome | null> {
+  return fence("seed_pool_record_feed_served", common(input));
 }

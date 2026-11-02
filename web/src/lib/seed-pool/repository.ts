@@ -34,13 +34,34 @@ export class SeedPoolRepository {
   async forget(ownerId: string, expectedRevision: number, seedId: string): Promise<SeedRpcOutcome | null> {
     return this.rpc("seed_pool_forget", { p_owner_id: ownerId, p_expected_revision: expectedRevision, p_seed_id: seedId });
   }
-  async registerAsset(ownerId: string, paper: SeedPaper, objectName: string): Promise<boolean> {
+  async stageAsset(ownerId: string, paper: SeedPaper, objectName: string, generation: number): Promise<boolean> {
+    const result = await this.rpc("seed_pool_stage_asset", { p_owner_id: ownerId, p_expected_revocation_generation: generation, p_id: paper.id, p_upload_id: paper.uploadId, p_canonical_key: paper.canonicalKey, p_content_hash: paper.contentHash, p_title: paper.title, p_features: paper.features, p_public_ids: paper.publicIds ?? {}, p_object_name: objectName });
+    return result?.status === "staging";
+  }
+  async finishAsset(ownerId: string, seedId: string): Promise<boolean> {
     try {
-      const { error } = await this.db.from("seed_pool_assets").insert({ id: paper.id, owner_id: ownerId, upload_id: paper.uploadId, canonical_key: paper.canonicalKey, title: paper.title, features: paper.features, public_ids: paper.publicIds ?? {}, object_name: objectName, status: "ready" });
-      return !error;
+      const { data, error } = await this.db.from("seed_pool_assets").update({ status: "ready" }).eq("owner_id", ownerId).eq("id", seedId).eq("status", "staging").select("id").maybeSingle();
+      return !error && !!data;
     } catch { return false; }
   }
-  async outputFence(name: "seed_pool_mark_batch_served" | "seed_pool_put_prepared_batch" | "seed_pool_ack_batch", args: Record<string, unknown>): Promise<SeedRpcOutcome | null> {
+  async removeAssetRecord(ownerId: string, seedId: string, status: "staging" | "revoked"): Promise<boolean> {
+    try { const { error } = await this.db.from("seed_pool_assets").delete().eq("owner_id", ownerId).eq("id", seedId).eq("status", status); return !error; } catch { return false; }
+  }
+  async markRevokedCleanupComplete(ownerId: string, seedIds: string[]): Promise<boolean> {
+    try { const { error } = await this.db.from("seed_pool_assets").update({ cleanup_complete: true }).eq("owner_id", ownerId).eq("status", "revoked").in("id", seedIds); return !error; } catch { return false; }
+  }
+  async editor(ownerId: string): Promise<SeedRpcOutcome | null> {
+    return this.rpc("seed_pool_editor", { p_owner_id: ownerId });
+  }
+  async claimCleanup(): Promise<Array<{ id: string; ownerId: string; objectName: string }> | null> {
+    try {
+      const { data, error } = await this.db.rpc("seed_pool_claim_cleanup", { p_limit: 25 });
+      if (error || !Array.isArray(data)) return null;
+      if (!data.every((entry) => entry && typeof entry.id === "string" && typeof entry.ownerId === "string" && typeof entry.objectName === "string")) return null;
+      return data;
+    } catch { return null; }
+  }
+  async outputFence(name: "seed_pool_mark_batch_served" | "seed_pool_put_prepared_batch" | "seed_pool_ack_batch" | "seed_pool_claim_digest" | "seed_pool_validate_digest_send" | "seed_pool_record_feed_served", args: Record<string, unknown>): Promise<SeedRpcOutcome | null> {
     return this.rpc(name, args);
   }
 }

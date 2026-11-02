@@ -3,6 +3,8 @@ export interface SeedPaper {
   id: string;
   uploadId: string;
   canonicalKey: string;
+  /** Exact-byte identity; used to prevent duplicate copies across DOI availability. */
+  contentHash: string;
   title: string;
   features: { topic: string[]; object: string[]; method: string[] };
   /** Public identifiers only; never a private PDF or extracted text. */

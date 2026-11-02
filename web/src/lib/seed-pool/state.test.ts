@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { EMPTY_SEED_POOL, forgetSeed, nextLocalDate, setSeedPool, snapshotForDate, undoPending } from "./state";
 import type { SeedPaper } from "./types";
-const seed = (id: string): SeedPaper => ({ id, uploadId: `upload:${id}`, canonicalKey: `doi:${id}`, title: `Paper ${id}`, features: { topic: ["fictional topic"], object: [], method: [] } });
+const seed = (id: string): SeedPaper => ({ id, uploadId: `upload:${id}`, canonicalKey: `doi:${id}`, contentHash: id === "one" ? "a".repeat(64) : id === "two" ? "b".repeat(64) : "c".repeat(64), title: `Paper ${id}`, features: { topic: ["fictional topic"], object: [], method: [] } });
 const edit = (state = EMPTY_SEED_POOL, changes: Partial<Parameters<typeof setSeedPool>[1]> = {}) => setSeedPool(state, { expectedRevision: state.revision, today: "2026-03-07", servedToday: false, version: "v1", seeds: [seed("one")], ...changes });
 function success(result: ReturnType<typeof setSeedPool>) { if (!result.ok) throw new Error(result.error); return result.state; }
 describe("seed pool local-day state", () => {

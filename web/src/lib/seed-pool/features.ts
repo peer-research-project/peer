@@ -45,9 +45,10 @@ export function seedFromExtractedDocument(doc: ExtractedDocument, bytes: Buffer,
   if (!features.topic.length && !features.object.length && !features.method.length) return null;
   const id = randomUUID();
   const normalizedDoi = verifiedDoi?.toLowerCase();
+  const contentHash = createHash("sha256").update(bytes).digest("hex");
   return {
-    id, uploadId: `seed:${id}`, title: doc.title?.trim() || "Untitled PDF",
-    canonicalKey: normalizedDoi ? `doi:${normalizedDoi}` : `sha256:${createHash("sha256").update(bytes).digest("hex")}`,
+    id, uploadId: `seed:${id}`, contentHash, title: doc.title?.trim() || "Untitled PDF",
+    canonicalKey: normalizedDoi ? `doi:${normalizedDoi}` : `sha256:${contentHash}`,
     features, ...(normalizedDoi ? { publicIds: { doi: normalizedDoi } } : {}),
   };
 }

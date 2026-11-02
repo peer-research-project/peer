@@ -25,7 +25,7 @@ export function nextLocalDate(value: string): string | null {
 }
 function validPaper(paper: SeedPaper): boolean {
   return Boolean(paper && typeof paper.id === "string" && paper.id && typeof paper.uploadId === "string" && paper.uploadId &&
-    typeof paper.canonicalKey === "string" && paper.canonicalKey && typeof paper.title === "string" && paper.title.trim() &&
+    typeof paper.canonicalKey === "string" && paper.canonicalKey && typeof paper.contentHash === "string" && /^[a-f0-9]{64}$/.test(paper.contentHash) && typeof paper.title === "string" && paper.title.trim() &&
     paper.features && (["topic", "object", "method"] as const).every((key) => Array.isArray(paper.features[key]) && paper.features[key].every((v) => typeof v === "string" && v.trim())) &&
     (["topic", "object", "method"] as const).some((key) => paper.features[key].length > 0));
 }
@@ -48,7 +48,7 @@ export function setSeedPool(state: SeedPoolState, input: { expectedRevision: num
   if (!tomorrow) return { ok: false, error: "invalid_date" };
   if (input.seeds.length > 5) return { ok: false, error: "too_many" };
   if (!input.version || input.seeds.some((seed) => !validPaper(seed))) return { ok: false, error: "invalid_seed" };
-  if (new Set(input.seeds.map((seed) => seed.canonicalKey)).size !== input.seeds.length || new Set(input.seeds.map((seed) => seed.id)).size !== input.seeds.length) return { ok: false, error: "duplicate" };
+  if (new Set(input.seeds.map((seed) => seed.canonicalKey)).size !== input.seeds.length || new Set(input.seeds.map((seed) => seed.contentHash)).size !== input.seeds.length || new Set(input.seeds.map((seed) => seed.id)).size !== input.seeds.length) return { ok: false, error: "duplicate" };
   const current = promoteDue(state, input.today);
   const immediate = current.history.length === 0 && !input.servedToday && input.seeds.length > 0;
   const snapshot: SeedSnapshot = { version: input.version, effectiveLocalDate: immediate ? input.today : tomorrow, seeds: structuredClone(input.seeds), revocationGeneration: current.revocationGeneration };

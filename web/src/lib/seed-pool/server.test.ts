@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ table: vi.fn(), rpc: vi.fn() }));
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => ({ from: mocks.table, rpc: mocks.rpc }) }));
-import { ackSeedBatch, markSeedBatchServed, putSeedPreparedBatch, resolveSeedPool } from "./server";
+import { ackSeedBatch, claimSeedDigest, markSeedBatchServed, putSeedPreparedBatch, resolveSeedPool, validateSeedDigestSend } from "./server";
 const selectResult = (error: null | { code: string }) => ({ select: () => ({ limit: async () => ({ error }) }) });
 beforeEach(() => { mocks.table.mockReset(); mocks.rpc.mockReset(); });
 describe("server seed resolution", () => {
@@ -33,4 +33,13 @@ describe("server seed resolution", () => {
     expect(mocks.rpc.mock.calls.map(([name]) => name)).toEqual(["seed_pool_mark_batch_served", "seed_pool_ack_batch", "seed_pool_put_prepared_batch"]);
     for (const [, args] of mocks.rpc.mock.calls) expect(args).toMatchObject({ p_owner_id: "owner-a", p_local_date: "2026-03-08", p_expected_version: "none", p_expected_revocation_generation: 0 });
   });
+  it("fences digest claim and pre-send checks with the same owner/date/version", async () => {
+    mocks.rpc.mockResolvedValue({ data: { status: "stale_pool" }, error: null });
+    const base = { ownerId: "owner-a", localDate: "2026-03-08", expectedVersion: "v2", expectedRevocationGeneration: 3 };
+    expect(await claimSeedDigest({ ...base, channel: "email", itemIds: ["item"], payload: {} })).toMatchObject({ status: "stale_pool" });
+    expect(await validateSeedDigestSend({ ...base, deliveryId: 4 })).toMatchObject({ status: "stale_pool" });
+    expect(mocks.rpc.mock.calls.map(([name]) => name)).toEqual(["seed_pool_claim_digest", "seed_pool_validate_digest_send"]);
+    for (const [, args] of mocks.rpc.mock.calls) expect(args).toMatchObject({ p_owner_id: "owner-a", p_local_date: "2026-03-08", p_expected_version: "v2", p_expected_revocation_generation: 3 });
+  });
+
 });
