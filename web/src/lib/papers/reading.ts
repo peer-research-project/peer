@@ -14,6 +14,7 @@
 // Decision block shows. Nothing else on the page hand-writes a status string.
 
 import type { Paper } from "@/types";
+import { fingerprintReadingSource } from "./reading-source";
 import type { ExtractedFigureCaption, ExtractedTable } from "./html-text";
 import type { ExtractedDocument } from "./html-text";
 import type { FullTextResult } from "./full-text";
@@ -156,6 +157,7 @@ export interface PaperReading {
    * cached passages use the previous extraction and need to be refreshed.
    */
   version: 19;
+  sourceFingerprint?: string;
   paperId: string;
   builtAt: string;
   provenance: ReadingProvenance;
@@ -813,6 +815,7 @@ export function buildReading(
 
   return {
     version: 19,
+    sourceFingerprint: fingerprintReadingSource(paper),
     paperId: paper.id,
     builtAt: now.toISOString(),
     provenance,

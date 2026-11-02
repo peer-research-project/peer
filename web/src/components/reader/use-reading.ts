@@ -13,8 +13,10 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Paper } from "@/types";
 import { buildReading, type PaperReading } from "@/lib/papers/reading";
+import { fingerprintReadingSource } from "@/lib/papers/reading-source";
+export { fingerprintReadingSource } from "@/lib/papers/reading-source";
 
-const STORAGE_KEY = "peer-reading-v3";
+const STORAGE_KEY = "peer-reading-v4";
 const MAX_ENTRIES = 40;
 const TTL_MS = 24 * 60 * 60 * 1000;
 /** The shape both gates below accept. Typed from the document itself, so
@@ -40,13 +42,6 @@ type ReadingCache = Record<string, { reading: PaperReading; ts: number }>;
  * was built against. `undefined` for every paper without a private
  * attachment, so the key is unchanged for the vast majority of papers.
  */
-export function fingerprintReadingSource(paper: Pick<Paper, "summaryIntro" | "summaryResultDiscussion">): string {
-  if (!paper.summaryIntro && !paper.summaryResultDiscussion) return "";
-  const source = JSON.stringify([paper.summaryIntro ?? "", paper.summaryResultDiscussion ?? ""]);
-  let h = 5381;
-  for (let i = 0; i < source.length; i += 1) h = ((h << 5) + h + source.charCodeAt(i)) | 0;
-  return (h >>> 0).toString(36);
-}
 
 export function buildReadingKey(
   paperId: string | undefined,
@@ -134,7 +129,10 @@ export function useReading(paper: Paper | undefined): {
   // P0-02 (spec D0): keyed by `readingKey`, which names the upload and its
   // revision, so a private PDF's reading is cached too — under its own key,
   // never the public paper's — instead of being read again on every open.
-  const cached = useMemo(() => (paperId ? readCached(readingKey) : null), [paperId, readingKey]);
+  const cached = useMemo(() => {
+    const value = paperId ? readCached(readingKey) : null;
+    return value?.sourceFingerprint === sourceFingerprint ? value : null;
+  }, [paperId, readingKey, sourceFingerprint]);
 
   const [fetched, setFetched] = useState<Fetched | null>(null);
 
@@ -149,13 +147,13 @@ export function useReading(paper: Paper | undefined): {
       if (controller.signal.aborted) return;
       try {
         // `v` first, so a private request keeps its `upload` parameter after it.
-        const res = await fetch(`/api/papers/${encodeURIComponent(paperId)}/reading?v=${READING_VERSION}${sourceFingerprint ? `&source=${sourceFingerprint}` : ""}${uploadId ? `&upload=${encodeURIComponent(uploadId)}` : ""}`, {
+        const res = await fetch(`/api/papers/${encodeURIComponent(paperId)}/reading?v=${READING_VERSION}&sf=1${sourceFingerprint ? `&source=${sourceFingerprint}` : ""}${uploadId ? `&upload=${encodeURIComponent(uploadId)}` : ""}`, {
           signal: controller.signal,
         });
         if (!res.ok) throw new Error(`reading HTTP ${res.status}`);
         const reading = (await res.json()) as PaperReading;
         if (controller.signal.aborted) return;
-        if (reading?.version !== READING_VERSION) throw new Error("reading: unexpected shape");
+        if (reading?.version !== READING_VERSION || reading.sourceFingerprint !== sourceFingerprint) throw new Error("reading: source mismatch");
         // The route answers `no-store` when the full-text attempt timed out —
         // that reading is the abstract alone, and keeping it for a day would
         // hide the sections the next request gets. Follow the server's own
