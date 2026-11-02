@@ -39,10 +39,8 @@ export class SeedPoolRepository {
     return result?.status === "staging";
   }
   async finishAsset(ownerId: string, seedId: string): Promise<boolean> {
-    try {
-      const { data, error } = await this.db.from("seed_pool_assets").update({ status: "ready" }).eq("owner_id", ownerId).eq("id", seedId).eq("status", "staging").select("id").maybeSingle();
-      return !error && !!data;
-    } catch { return false; }
+    const result = await this.rpc("seed_pool_finish_asset", { p_owner_id: ownerId, p_seed_id: seedId });
+    return result?.status === "ready";
   }
   async removeAssetRecord(ownerId: string, seedId: string, status: "staging" | "revoked"): Promise<boolean> {
     try { const { error } = await this.db.from("seed_pool_assets").delete().eq("owner_id", ownerId).eq("id", seedId).eq("status", status); return !error; } catch { return false; }
@@ -61,7 +59,7 @@ export class SeedPoolRepository {
       return data;
     } catch { return null; }
   }
-  async outputFence(name: "seed_pool_mark_batch_served" | "seed_pool_put_prepared_batch" | "seed_pool_ack_batch" | "seed_pool_claim_digest" | "seed_pool_validate_digest_send" | "seed_pool_record_feed_served" | "seed_pool_persist_digest_email", args: Record<string, unknown>): Promise<SeedRpcOutcome | null> {
+  async outputFence(name: "seed_pool_mark_batch_served" | "seed_pool_put_prepared_batch" | "seed_pool_ack_batch" | "seed_pool_claim_digest" | "seed_pool_validate_digest_send" | "seed_pool_record_feed_served" | "seed_pool_persist_digest_email" | "seed_pool_put_private_pool", args: Record<string, unknown>): Promise<SeedRpcOutcome | null> {
     return this.rpc(name, args);
   }
 }

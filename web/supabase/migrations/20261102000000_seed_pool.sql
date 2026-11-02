@@ -29,6 +29,7 @@ create table if not exists public.seed_pool_assets (
   created_at timestamptz not null default now(),
   cleanup_after timestamptz,
   cleanup_complete boolean not null default false,
+  writer_settled boolean not null default false,
   unique(owner_id, id)
 );
 create table if not exists public.seed_pool_snapshots (
@@ -120,7 +121,7 @@ begin
   -- A retried cleanup references the canonical tombstone already stored with
   -- each revoked asset; no feature data is revived or new generation minted.
   if v_status='revoked' then
-    select coalesce(jsonb_agg(jsonb_build_object('id',id::text,'objectName',object_name,'cleanupAfter',cleanup_after)),'[]'::jsonb) into v_objects
+    select coalesce(jsonb_agg(jsonb_build_object('id',id::text,'objectName',object_name,'cleanupAfter',cleanup_after,'writerSettled',writer_settled)),'[]'::jsonb) into v_objects
       from public.seed_pool_assets where owner_id=p_owner_id and status='revoked' and canonical_key=v_key;
     return jsonb_build_object('status','revoked','objects',v_objects,'revision',v_state.revision,'revocationGeneration',v_state.revocation_generation);
   end if;
@@ -128,7 +129,7 @@ begin
     select id,canonical_key,content_hash from public.seed_pool_assets where owner_id=p_owner_id and id=p_seed_id
     union
     select a.id,a.canonical_key,a.content_hash from public.seed_pool_assets a join related r on a.canonical_key=r.canonical_key or a.content_hash=r.content_hash where a.owner_id=p_owner_id and a.status<>'revoked'
-  ) select array_agg(a.id),coalesce(jsonb_agg(jsonb_build_object('id',a.id::text,'objectName',a.object_name,'cleanupAfter',case when a.status='staging' then greatest(now()+interval '2 minutes', a.created_at+interval '3 minutes') else now() end)),'[]'::jsonb) into v_ids,v_objects
+  ) select array_agg(a.id),coalesce(jsonb_agg(jsonb_build_object('id',a.id::text,'objectName',a.object_name,'writerSettled',a.writer_settled,'cleanupAfter',case when a.status='staging' then greatest(now()+interval '2 minutes', a.created_at+interval '3 minutes') else now() end)),'[]'::jsonb) into v_ids,v_objects
     from public.seed_pool_assets a where a.owner_id=p_owner_id and a.id in (select id from related);
   select coalesce(array_agg(s.version::text),'{}'::text[]) into v_versions
     from public.seed_pool_snapshots s where s.owner_id=p_owner_id and exists
@@ -205,6 +206,7 @@ begin
   select * into v_row from public.dashboard_batches where id=p_batch_id and owner_id=p_owner_id and local_date=p_local_date::text for update;
   if not found then return jsonb_build_object('status','not_found'); end if;
   if coalesce(v_row.seed_pool_version,'none')<>p_expected_version or v_row.seed_revocation_generation<>p_expected_revocation_generation then return jsonb_build_object('status','stale_pool'); end if;
+  if v_row.status='prepared' then return jsonb_build_object('status','not_served'); end if;
   v_status := public.acknowledge_dashboard_batch(p_owner_id,p_batch_id);
   return jsonb_build_object('status',v_status);
 end $$;
@@ -227,6 +229,11 @@ begin
       v_current := v_current || jsonb_build_object('pending',jsonb_build_object('version',v_pending.version::text,'effectiveLocalDate',v_pending.effective_date::text,'seeds',v_pending.seeds,'revocationGeneration',v_state.revocation_generation));
     end if;
   end if;
+  -- Ready drafts are private and expire if never attached to a pool.
+  v_current := v_current || jsonb_build_object('availableAssets',coalesce((
+    select jsonb_agg(jsonb_build_object('id',a.id::text,'uploadId',a.upload_id,'canonicalKey',a.canonical_key,'contentHash',a.content_hash,'title',a.title,'features',a.features,'publicIds',a.public_ids) order by a.created_at)
+    from public.seed_pool_assets a where a.owner_id=p_owner_id and a.status='ready'
+  ),'[]'::jsonb));
   return v_current;
 end $$;
 revoke all on function public.seed_pool_editor(uuid) from public,anon,authenticated;
@@ -285,8 +292,7 @@ returns jsonb language plpgsql security definer set search_path=public,pg_temp a
 declare v_candidate record; v_asset public.seed_pool_assets%rowtype; v_zone text; v_today date; v_in_use boolean; v_result jsonb := '[]'::jsonb;
 begin
   for v_candidate in select a.id,a.owner_id from public.seed_pool_assets a where
-    (a.status='revoked' and not a.cleanup_complete and coalesce(a.cleanup_after,now())<=now()) or
-    (a.status='staging' and a.created_at<now()-interval '10 minutes') or
+    (a.status='revoked' and a.writer_settled and not a.cleanup_complete and coalesce(a.cleanup_after,now())<=now()) or
     (a.status='ready' and a.created_at<now()-interval '24 hours' and not exists (select 1 from public.seed_pool_snapshots s where s.owner_id=a.owner_id and not s.superseded and exists(select 1 from jsonb_array_elements(s.seeds) e where e->>'id'=a.id::text)))
     order by a.created_at limit greatest(1,least(coalesce(p_limit,25),100))
   loop
@@ -294,7 +300,7 @@ begin
     select * into v_asset from public.seed_pool_assets where owner_id=v_candidate.owner_id and id=v_candidate.id for update;
     if not found then continue; end if;
     if v_asset.status='revoked' then
-      if v_asset.cleanup_complete then continue; end if;
+      if v_asset.cleanup_complete or not v_asset.writer_settled then continue; end if;
       if coalesce(v_asset.cleanup_after,now())>now() then continue; end if;
     else
       if v_asset.status='staging' and v_asset.created_at>=now()-interval '10 minutes' then continue; end if;
@@ -346,3 +352,39 @@ begin
 end $$;
 revoke all on function public.seed_pool_persist_digest_email(uuid,date,bigint,text,bigint,jsonb) from public,anon,authenticated;
 grant execute on function public.seed_pool_persist_digest_email(uuid,date,bigint,text,bigint,jsonb) to service_role;
+
+-- A stale in-flight build must not recreate private derived cache after forget.
+create or replace function public.seed_pool_put_private_pool(p_owner_id uuid,p_local_date date,p_expected_version text,p_expected_revocation_generation bigint,p_scope_key text,p_payload jsonb)
+returns jsonb language plpgsql security definer set search_path=public,pg_temp as $$
+begin
+  perform pg_advisory_xact_lock(hashtextextended(p_owner_id::text,725113));
+  if public.seed_pool_fence_matches(p_owner_id,p_local_date,p_expected_version,p_expected_revocation_generation) is not true then return jsonb_build_object('status','stale_pool'); end if;
+  if p_scope_key is null or length(p_scope_key)=0 or length(p_scope_key)>1024 or p_payload is null then return jsonb_build_object('status','invalid'); end if;
+  insert into public.private_paper_pools(owner_id,scope_key,payload,created_at) values(p_owner_id,p_scope_key,p_payload,now())
+  on conflict(owner_id,scope_key) do update set payload=excluded.payload,created_at=excluded.created_at;
+  return jsonb_build_object('status','stored');
+end $$;
+revoke all on function public.seed_pool_put_private_pool(uuid,date,text,bigint,text,jsonb) from public,anon,authenticated;
+grant execute on function public.seed_pool_put_private_pool(uuid,date,text,bigint,text,jsonb) to service_role;
+
+-- Called only after storage confirms its write completed. A revoked writer may
+-- not publish; it only releases its tombstone for retryable cleanup.
+create or replace function public.seed_pool_finish_asset(p_owner_id uuid,p_seed_id uuid)
+returns jsonb language plpgsql security definer set search_path=public,pg_temp as $$
+declare v_status text;
+begin
+  perform pg_advisory_xact_lock(hashtextextended(p_owner_id::text,725113));
+  select status into v_status from public.seed_pool_assets where owner_id=p_owner_id and id=p_seed_id for update;
+  if not found then return jsonb_build_object('status','not_found'); end if;
+  if v_status='staging' then
+    update public.seed_pool_assets set status='ready',writer_settled=true where owner_id=p_owner_id and id=p_seed_id;
+    return jsonb_build_object('status','ready');
+  end if;
+  if v_status='revoked' then
+    update public.seed_pool_assets set writer_settled=true where owner_id=p_owner_id and id=p_seed_id;
+    return jsonb_build_object('status','revoked');
+  end if;
+  return jsonb_build_object('status',v_status);
+end $$;
+revoke all on function public.seed_pool_finish_asset(uuid,uuid) from public,anon,authenticated;
+grant execute on function public.seed_pool_finish_asset(uuid,uuid) to service_role;
