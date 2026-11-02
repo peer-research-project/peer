@@ -38,6 +38,8 @@ import {
 import { classifySendFailure } from "@/lib/email/send-failure";
 import { serializeFeedIntent } from "@/lib/feed/intent";
 import { dashboardLedgerEnabled } from "@/lib/dashboard/ledger-flag";
+import { dateInTimezone } from "@/lib/dashboard/timezone";
+import { seedOutputContext } from "@/lib/seed-pool/output";
 import { isOwnerDueForPrepare, PREPARE_LEAD_MINUTES, PREPARE_LOOKAHEAD_MS } from "@/lib/dashboard/due-owners";
 import { createPrepareAheadBuildPool, PROFILE_COLUMNS } from "@/lib/dashboard/prepare-pool";
 import {
@@ -244,12 +246,23 @@ async function runDueSelectionAndEnqueue(
       continue;
     }
     try {
-      // P11 fix (due-owners.ts) — dueCheck.batchLocalDate, NEVER
-      // dateInTimezone(now, row.digest_timezone), is what gets written here.
+      // Installed seed schema shares the owner's check-in calendar date with
+      // web and email. Explicitly absent schema keeps the legacy server key.
+      let batchDate = dueCheck.batchLocalDate;
+      if (deps.resolveSeeds) {
+        const ownerDate = dateInTimezone(dueCheck.checkinInstant, row.digest_timezone);
+        if (!ownerDate) { bumpReason(skippedReasons, "timezone_unresolved"); continue; }
+        const resolution = await deps.resolveSeeds(row.user_id, ownerDate, now);
+        const context = seedOutputContext(resolution, ownerDate);
+        if (context.kind === "unavailable" || (context.kind === "ready" && resolution.timezone !== row.digest_timezone)) {
+          bumpReason(skippedReasons, "seed_pool_unavailable"); continue;
+        }
+        if (context.kind === "ready") batchDate = ownerDate;
+      }
       await deps.jobs.enqueue(
         {
           ownerId: row.user_id,
-          localDate: dueCheck.batchLocalDate,
+          localDate: batchDate,
           intentVersion: serializeFeedIntent(normalized.request.intent),
           nextAttemptAt: dueCheck.dueAt,
         },

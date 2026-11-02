@@ -606,3 +606,41 @@ describe("runDashboardPrepareCycle — enqueue idempotency", () => {
     expect(third?.status).toBe("pending"); // never claimed, since dueAt > now throughout
   });
 });
+
+
+it("enqueues the owner-local Tokyo date for installed seeds, preserving future snapshot selection", async () => {
+  enableCycle(); vi.stubEnv("TZ", "UTC");
+  const now = new Date("2026-09-24T22:00:00.000Z");
+  const jobs = new MemoryDashboardPrepareJobRepository();
+  const resolveSeeds = vi.fn(async (_owner: string, date: string) => ({ status: "none" as const, schemaInstalled: true, ownerLocalDate: "2026-09-25", timezone: "Asia/Tokyo", snapshot: { version: date === "2026-09-25" ? "next-v" : "old-v", effectiveLocalDate: date, seeds: [], revocationGeneration: 0 }, revision: 2, revocationGeneration: 0 }));
+  const deps = makeDeps({ fetchDueProfiles: vi.fn(async () => [baseRow({ digest_hour_local: 8, digest_timezone: "Asia/Tokyo" })]), jobs, resolveSeeds, maxJobsPerRun: 0 });
+  const report = await runDashboardPrepareCycle(deps, now);
+  expect(report.prepare.enqueued).toBe(1);
+  expect(resolveSeeds).toHaveBeenCalledWith(OWNER, "2026-09-25", now);
+  expect(await jobs.getByOwnerDate(OWNER, "2026-09-25")).not.toBeNull();
+  expect(await jobs.getByOwnerDate(OWNER, "2026-09-24")).toBeNull();
+});
+
+it("skips enqueue if installed seed state is unavailable", async () => {
+  enableCycle(); vi.stubEnv("TZ", "UTC");
+  const now = new Date("2026-09-24T22:00:00.000Z");
+  const jobs = new MemoryDashboardPrepareJobRepository();
+  const resolveSeeds = vi.fn(async () => ({ status: "unavailable" as const, schemaInstalled: null, ownerLocalDate: null, timezone: null, snapshot: null, revision: null, revocationGeneration: 0 }));
+  const deps = makeDeps({ fetchDueProfiles: vi.fn(async () => [baseRow({ digest_hour_local: 8, digest_timezone: "Asia/Tokyo" })]), jobs, resolveSeeds, maxJobsPerRun: 0 });
+  const report = await runDashboardPrepareCycle(deps, now);
+  expect(report.prepare.enqueued).toBe(0);
+  expect(report.prepare.skipped_reasons).toMatchObject({ seed_pool_unavailable: 1 });
+});
+
+
+it("keeps the server-date job key only when the seed schema is explicitly absent", async () => {
+  enableCycle(); vi.stubEnv("TZ", "UTC");
+  const now = new Date("2026-09-24T22:00:00.000Z");
+  const jobs = new MemoryDashboardPrepareJobRepository();
+  const resolveSeeds = vi.fn(async () => ({ status: "none" as const, schemaInstalled: false, ownerLocalDate: null, timezone: null, snapshot: null, revision: 0, revocationGeneration: 0 }));
+  const deps = makeDeps({ fetchDueProfiles: vi.fn(async () => [baseRow({ digest_hour_local: 8, digest_timezone: "Asia/Tokyo" })]), jobs, resolveSeeds, maxJobsPerRun: 0 });
+  const report = await runDashboardPrepareCycle(deps, now);
+  expect(report.prepare.enqueued).toBe(1);
+  expect(await jobs.getByOwnerDate(OWNER, "2026-09-24")).not.toBeNull();
+  expect(await jobs.getByOwnerDate(OWNER, "2026-09-25")).toBeNull();
+});
