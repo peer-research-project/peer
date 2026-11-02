@@ -323,7 +323,7 @@ export const PASSAGE_LOST_LINE = "This passage is not in this version of the pap
 type Body = readonly AnchorSection[];
 
 /** The key of the reading the reading page keeps in this browser (`use-reading.ts`); an entry's key starts with the paper's id. */
-const READING_CACHE_KEY = "peer-reading-v3";
+const READING_CACHE_KEY = "peer-reading-v4";
 /**
  * The two gates `use-reading.ts` puts on a cached reading, copied from there (its `READING_VERSION` and `TTL_MS` are not
  * exported): an entry of another shape version, or older than a day, is not the reading the page would show, so it is
@@ -333,7 +333,7 @@ const READING_VERSION: PaperReading["version"] = 19;
 const READING_TTL_MS = 24 * 60 * 60 * 1000;
 
 let parsedFrom: string | null = null;
-let parsed: Record<string, { ts?: unknown; reading?: { version?: unknown; body?: unknown } } | undefined> = {};
+let parsed: Record<string, { ts?: unknown; reading?: { version?: unknown; sourceFingerprint?: unknown; body?: unknown } } | undefined> = {};
 /** The cache is parsed once per change of its text, not once per heading per render. */
 function cachedReadings(raw: string | null) {
   if (raw !== parsedFrom) {
@@ -362,6 +362,8 @@ export function storedBodyOf(paperId: string, storage?: Pick<Storage, "getItem">
     for (const [key, entry] of Object.entries(cachedReadings(store.getItem(READING_CACHE_KEY)))) {
       if (!key.startsWith(`${paperId}|`)) continue;
       if (entry?.reading?.version !== READING_VERSION) continue;
+      const keyFingerprint = key.match(/\|source:([a-z0-9]+)$/)?.[1] ?? "";
+      if (entry.reading.sourceFingerprint !== keyFingerprint) continue;
       if (typeof entry.ts !== "number" || now - entry.ts >= READING_TTL_MS) continue;
       const body = entry.reading.body;
       const sound = Array.isArray(body) && body.every((one) => Array.isArray(one?.paragraphs) && one.paragraphs.every((p: unknown) => typeof p === "string"));
