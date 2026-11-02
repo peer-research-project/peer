@@ -4,7 +4,7 @@
 
 import { useEffect, useState } from "react";
 
-export type UploadsAvailability = "unknown" | "available" | "unavailable";
+export type UploadsAvailability = "unknown" | "available" | "unavailable" | "error";
 
 /**
  * The fetch outcome, reduced to the one bit this hook keeps — a pure map so
@@ -15,7 +15,13 @@ export type UploadsAvailability = "unknown" | "available" | "unavailable";
  * a response with no body, and a malformed one — never assume available.
  */
 export function availabilityFromResponse(ok: boolean, data: { enabled?: boolean } | null): UploadsAvailability {
-  return ok && data?.enabled === true ? "available" : "unavailable";
+  if (!ok || typeof data?.enabled !== "boolean") return "error";
+  return data.enabled ? "available" : "unavailable";
+}
+
+/** Gate transfer only. The upload entry must remain visible in every state. */
+export function uploadsReady(state: UploadsAvailability): boolean {
+  return state === "available";
 }
 
 export function useUploadsAvailable(enabled = true, attempt = 0): UploadsAvailability {

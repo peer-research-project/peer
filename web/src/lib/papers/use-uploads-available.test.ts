@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   availabilityFromResponse,
   useUploadsAvailable,
+  uploadsReady,
   type UploadsAvailability,
 } from "./use-uploads-available";
 
@@ -25,12 +26,12 @@ describe("availabilityFromResponse", () => {
   });
 
   it("is unavailable for a non-2xx response, even with a truthy body", () => {
-    expect(availabilityFromResponse(false, { enabled: true })).toBe("unavailable");
+    expect(availabilityFromResponse(false, { enabled: true })).toBe("error");
   });
 
   it("is unavailable when the body has no enabled field, or no body at all — never assumed available", () => {
-    expect(availabilityFromResponse(true, {})).toBe("unavailable");
-    expect(availabilityFromResponse(true, null)).toBe("unavailable");
+    expect(availabilityFromResponse(true, {})).toBe("error");
+    expect(availabilityFromResponse(true, null)).toBe("error");
   });
 });
 
@@ -56,4 +57,9 @@ describe("useUploadsAvailable — SSR safety", () => {
     const html = renderToStaticMarkup(createElement(Host, { enabled: false }));
     expect(html).toContain("unknown");
   });
+});
+
+
+it.each([ ["available", true], ["unknown", false], ["unavailable", false], ["error", false] ] as const)("transfer readiness: %s", (state, ready) => {
+  expect(uploadsReady(state)).toBe(ready);
 });

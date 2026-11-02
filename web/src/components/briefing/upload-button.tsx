@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Paper } from "@/types";
 import { UPLOAD_BUTTON } from "@/lib/briefing/copy";
@@ -10,7 +10,7 @@ import { UPLOAD_RIGHTS_VERSION } from "@/lib/papers/upload-policy";
 import { useProfileStore } from "@/store/profile";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
-import { useUploadsAvailable, type UploadsAvailability } from "@/lib/papers/use-uploads-available";
+import { useUploadsAvailable, uploadsReady, type UploadsAvailability } from "@/lib/papers/use-uploads-available";
 import { supabase } from "@/lib/supabase/client";
 
 interface UploadResponse {
@@ -124,12 +124,13 @@ function UploadGlyph({ size }: { size: number }) {
   );
 }
 
-export function UploadAvailabilityMessage({ state, onRetry }: { state: UploadsAvailability; onRetry: () => void }) {
+export function UploadAvailabilityMessage({ state, onRetry, onClose }: { state: UploadsAvailability; onRetry: () => void; onClose?: () => void }) {
   if (state === "available") return null;
   return (
-    <div role="status" className="absolute left-0 top-full z-50 mt-1 w-64 rounded-md border border-border bg-surface p-3 text-body-sm text-text shadow-card">
-      <p>{state === "unknown" ? "Checking whether PDF upload is available…" : "PDF upload is unavailable. Check your connection or try again later."}</p>
+    <div role="status" className="fixed bottom-4 left-1/2 z-50 w-64 max-w-[calc(100vw-2rem)] -translate-x-1/2 rounded-md border border-border bg-surface p-3 text-body-sm text-text shadow-card">
+      <p>{state === "unknown" ? "Checking whether PDF upload is available…" : state === "unavailable" ? "PDF upload is not enabled on this site." : "Could not check PDF upload availability. Check your connection and try again."}</p>
       <button type="button" className="mt-2 underline" onClick={onRetry}>Retry</button>
+      {onClose && <button type="button" className="ml-4 mt-2 underline" onClick={onClose}>Close</button>}
     </div>
   );
 }
@@ -142,6 +143,12 @@ export function UploadButton({ className = "", targetPaper, onUploaded }: {
   const availability = useUploadsAvailable(true, attempt);
   const [showAvailability, setShowAvailability] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (!showAvailability) return;
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") setShowAvailability(false); };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [showAvailability]);
   const [isUploading, setIsUploading] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -154,6 +161,7 @@ export function UploadButton({ className = "", targetPaper, onUploaded }: {
 
   const chooseFile = (file: File) => {
     setError(null);
+    if (!uploadsReady(availability)) { setShowAvailability(true); return; }
     if (!looksLikePdf(file)) { setError("That doesn't look like a PDF."); return; }
     if (isOverUploadCap(file)) { setError("That PDF is larger than 25 MB."); return; }
     setPendingFile(file);
@@ -161,6 +169,7 @@ export function UploadButton({ className = "", targetPaper, onUploaded }: {
 
   const upload = async (file: File, confirmMatch = false) => {
     setError(null);
+    if (!uploadsReady(availability)) { setShowAvailability(true); return; }
     if (!looksLikePdf(file)) {
       setError(UPLOAD_BUTTON.error("That doesn't look like a PDF."));
       return;
@@ -226,7 +235,7 @@ export function UploadButton({ className = "", targetPaper, onUploaded }: {
         aria-label={targetPaper ? undefined : "upload pdf paper to deep read"}
         disabled={isUploading}
         onClick={() => {
-          if (availability !== "available") { setShowAvailability(true); return; }
+          if (!uploadsReady(availability)) { setShowAvailability(true); return; }
           inputRef.current?.click();
         }}
         onDragOver={(event) => {
@@ -238,7 +247,7 @@ export function UploadButton({ className = "", targetPaper, onUploaded }: {
           event.preventDefault();
           setIsDragOver(false);
           if (isUploading) return;
-          if (availability !== "available") { setShowAvailability(true); return; }
+          if (!uploadsReady(availability)) { setShowAvailability(true); return; }
           const file = event.dataTransfer.files?.[0];
           if (file) chooseFile(file);
         }}
@@ -282,7 +291,7 @@ export function UploadButton({ className = "", targetPaper, onUploaded }: {
           if (file) chooseFile(file);
         }}
       />
-      {showAvailability && <UploadAvailabilityMessage state={availability} onRetry={() => setAttempt((n) => n + 1)} />}
+      {showAvailability && <UploadAvailabilityMessage state={availability} onRetry={() => setAttempt((n) => n + 1)} onClose={() => setShowAvailability(false)} />}
       {pendingFile && <UploadConsentDialog file={pendingFile} onCancel={() => setPendingFile(null)}
         onAccept={() => { const file = pendingFile; setPendingFile(null); void upload(file); }} />}
       {pendingMatch && targetPaper && (

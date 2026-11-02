@@ -441,7 +441,17 @@ describe("page.tsx source — uploadAction stays visible", () => {
     const start = source.indexOf("const uploadAction =");
     expect(start).toBeGreaterThan(-1);
     const madeAt = source.slice(start, source.indexOf("\n", start));
-    expect(madeAt).toContain("<UploadButton targetPaper={paper}");
+    // Parse the condition, so e.g. `false && !paper.id...` cannot pass.
+    const ts = await import("typescript");
+    const file = ts.createSourceFile("action.tsx", madeAt, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+    const statement = file.statements[0];
+    expect(ts.isVariableStatement(statement)).toBe(true);
+    if (!ts.isVariableStatement(statement)) throw new Error("expected action declaration");
+    const init = statement.declarationList.declarations[0].initializer;
+    expect(init && ts.isConditionalExpression(init)).toBe(true);
+    if (!init || !ts.isConditionalExpression(init)) throw new Error("expected action condition");
+    expect(init.condition.getText(file)).toBe('!paper.id.startsWith("upload:")');
+    expect(init.whenTrue.getText(file)).toContain("<UploadButton targetPaper={paper}");
     expect(madeAt).not.toContain("uploadsAvailable");
     expect(source.match(/uploadAction=\{uploadAction\}/g)).toHaveLength(2);
     expect(source.match(/uploadAction=\{/g)).toHaveLength(2);

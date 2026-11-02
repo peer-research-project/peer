@@ -5,7 +5,7 @@ import { UploadAvailabilityMessage } from "./upload-button";
 
 describe("upload availability explanation", () => {
   it("explains checking and failure and offers retry for both", () => {
-    for (const [state, text] of [["unknown", "Checking whether"], ["unavailable", "PDF upload is unavailable"]] as const) {
+    for (const [state, text] of [["unknown", "Checking whether"], ["unavailable", "PDF upload is not enabled"]] as const) {
       const html = renderToStaticMarkup(createElement(UploadAvailabilityMessage, { state, onRetry: () => {} }));
       expect(html).toContain(text);
       expect(html).toContain(">Retry</button>");
