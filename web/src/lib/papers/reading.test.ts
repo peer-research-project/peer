@@ -1204,3 +1204,8 @@ it("does not assert legacy abstract provenance when no abstract was read", () =>
   expect(text).toContain("abstract is unavailable");
   expect(text).not.toContain("Read by your model from the abstract");
 });
+
+it("uses the final publisher host when a payment response followed a DOI redirect", () => {
+  const result = { status: "paywalled" as const, reason: "publisher.example requires paid or institutional access — Peer could not read the full paper.", attempts: [{ link: { url: "https://doi.org/10.1234/example", kind: "html" as const, label: "doi" as const, rank: 1 }, outcome: "paywalled", finalUrl: "https://publisher.example/article" }] };
+  expect(buildReading(normalPaper, result).provenance.paywallHost).toBe("publisher.example");
+});

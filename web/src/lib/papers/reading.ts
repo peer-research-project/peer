@@ -503,13 +503,14 @@ function hostOf(url: string): string | undefined {
 
 /** The host that blocked the full text, from the attempt that hit the wall. */
 function paywallHostOf(fullText: FullTextResult): string | undefined {
-  const blocked = fullText.attempts.find((attempt) =>
+  const blocked = [...fullText.attempts].reverse().find((attempt) =>
     attempt.outcome.startsWith("paywalled"),
   );
-  if (blocked) return hostOf(blocked.link.url);
-  // `paywallReason` opens with the host when it knew one.
+  if (blocked?.finalUrl) return hostOf(blocked.finalUrl);
+  // Older results may have only the final host in the reason.
   const match = fullText.reason?.match(/^([\w.-]+\.[a-z]{2,}) requires\b/i);
-  return match?.[1];
+  if (match) return match[1].replace(/^www\./i, "");
+  return blocked ? hostOf(blocked.link.url) : undefined;
 }
 
 /**

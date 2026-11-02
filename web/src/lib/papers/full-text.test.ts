@@ -81,7 +81,7 @@ async function useRealUploadRead(): Promise<void> {
 const htmlLink = (url: string): SourceLink => ({ url, kind: "html", label: "publisher-html", rank: 10 });
 const pdfLink = (url: string): SourceLink => ({ url, kind: "pdf", label: "doi", rank: 20 });
 
-describe("getFullText — 1-16, a hard 401/402/403/451 is reported as paywalled", () => {
+describe("getFullText — 1-16, hard access statuses are classified by evidence", () => {
   const originalFetch = globalThis.fetch;
 
   beforeEach(() => {
@@ -93,7 +93,7 @@ describe("getFullText — 1-16, a hard 401/402/403/451 is reported as paywalled"
     vi.restoreAllMocks();
   });
 
-  it("reports a hard-403 HTML response as paywalled, not source_unavailable", async () => {
+  it("reports a hard-403 HTML response as blocked", async () => {
     mocks.collectSourceLinks.mockResolvedValue([
       htmlLink("https://onlinelibrary.wiley.com/doi/10.1002/test.1"),
     ]);
@@ -101,9 +101,9 @@ describe("getFullText — 1-16, a hard 401/402/403/451 is reported as paywalled"
 
     const result = await getFullText({ paperId: "test:html-403", doi: "10.1002/test.1" });
 
-    expect(result.status).toBe("paywalled");
+    expect(result.status).toBe("source_unavailable");
     expect(result.reason).toContain("onlinelibrary.wiley.com");
-    expect(result.reason).toContain("paid or institutional access");
+    expect(result.reason).toContain("blocked this request");
   });
 
   it("still reports a plain fetch failure (not a paywall status) as no_full_text, never paywalled", async () => {
@@ -122,7 +122,7 @@ describe("getFullText — 1-16, a hard 401/402/403/451 is reported as paywalled"
     expect(result.attempts[0].outcome).toContain("source_unavailable");
   });
 
-  it("reports a hard-403 PDF fetch as paywalled too (the PDF path shares the same bug)", async () => {
+  it("reports a hard-403 PDF fetch as blocked", async () => {
     mocks.collectSourceLinks.mockResolvedValue([
       pdfLink("https://pubs.acs.org/doi/pdf/10.1021/test.1"),
     ]);
@@ -130,7 +130,7 @@ describe("getFullText — 1-16, a hard 401/402/403/451 is reported as paywalled"
 
     const result = await getFullText({ paperId: "test:pdf-403", doi: "10.1021/test.1" });
 
-    expect(result.status).toBe("paywalled");
+    expect(result.status).toBe("source_unavailable");
     expect(result.reason).toContain("pubs.acs.org");
   });
 
@@ -145,7 +145,7 @@ describe("getFullText — 1-16, a hard 401/402/403/451 is reported as paywalled"
 
     const result = await getFullText({ paperId: "openalex:W7212207112" });
 
-    expect(result.status).toBe("no_full_text");
+    expect(result.status).toBe("source_unavailable");
     expect(result.attempts[0].outcome).toContain("source_unavailable");
   });
 });
@@ -477,5 +477,42 @@ describe("getFullText — P0-05, a non-canonical upload id is refused, never rea
     expect(mocks.readUploadPdf).not.toHaveBeenCalled();
     expect(mocks.collectSourceLinks).not.toHaveBeenCalled();
     expect(mocks.pdfOpens.n).toBe(0);
+  });
+});
+
+
+describe("access evidence and redirects", () => {
+  afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+  it.each(["html", "pdf"] as const)("preserves the final host for a blocked %s redirect", async (kind) => {
+    mocks.collectSourceLinks.mockResolvedValue([kind === "html" ? htmlLink("https://doi.org/10.1234/example") : pdfLink("https://doi.org/10.1234/example")]);
+    const response = new Response("", { status: 403 });
+    Object.defineProperty(response, "url", { value: "https://publisher.example/article" });
+    vi.stubGlobal("fetch", vi.fn(async () => response));
+    const result = await getFullText({ paperId: `test:redirect-${kind}` });
+    expect(result.status).toBe("source_unavailable");
+    expect(result.reason).toContain("publisher.example");
+    expect(result.attempts[0].finalUrl).toBe("https://publisher.example/article");
+    expect(result.reason).not.toContain("doi.org");
+    expect(result.reason).not.toContain("abstract");
+  });
+  it("does not treat a CAPTCHA page as a subscription", async () => {
+    mocks.collectSourceLinks.mockResolvedValue([htmlLink("https://publisher.example/article")]);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("<html>CAPTCHA</html>", { headers: { "content-type": "text/html" } })));
+    const result = await getFullText({ paperId: "test:captcha" });
+    expect(result.status).toBe("source_unavailable");
+    expect(result.attempts[0].finalUrl).toBe("https://publisher.example/article");
+  });
+  it("does not infer a subscription from a sign-in request", async () => {
+    mocks.collectSourceLinks.mockResolvedValue([htmlLink("https://publisher.example/article")]);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("<html>Sign in to access this article.</html>", { headers: { "content-type": "text/html" } })));
+    const result = await getFullText({ paperId: "test:signin" });
+    expect(result.status).not.toBe("paywalled");
+  });
+  it("recognizes an explicit payment response", async () => {
+    mocks.collectSourceLinks.mockResolvedValue([htmlLink("https://publisher.example/article")]);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 402 })));
+    const result = await getFullText({ paperId: "test:402" });
+    expect(result.status).toBe("paywalled");
+    expect(result.reason).not.toContain("abstract");
   });
 });
