@@ -15,9 +15,9 @@ const all = (node: ReactNode): El[] => Array.isArray(node) ? node.flatMap(all) :
 const words = (node: ReactNode): string => Array.isArray(node) ? node.map(words).join("") : typeof node === "string" || typeof node === "number" ? String(node) : node && typeof node === "object" && "props" in node ? words((node as El).props.children) : "";
 const btn = (nodes: El[], text: string) => nodes.find((n) => n.type === "button" && words(n.props.children) === text)!;
 type Step = (nodes: El[]) => void;
-async function run(steps: Step[]) {
+async function run(steps: Step[], onProgress?: (state: { busy: boolean; dirty: boolean }) => void) {
  const pending = [...steps]; let nodes: El[] = [];
- const mounted = await hookRuntime.mount(() => { const tree = OwnerSeedPool({}); nodes = all(tree); const [round, setRound] = useState(0); useEffect(() => { if (!btn(nodes, "Save pool") || !pending.length) return; pending.shift()!(nodes); setRound((n) => n + 1); }, [round, !!btn(nodes, "Save pool")]); return tree; }, { maxRounds: 100 });
+ const mounted = await hookRuntime.mount(() => { const tree = OwnerSeedPool({ onProgress }); nodes = all(tree); const [round, setRound] = useState(0); useEffect(() => { if (!btn(nodes, "Save pool") || !pending.length) return; pending.shift()!(nodes); setRound((n) => n + 1); }, [round, !!btn(nodes, "Save pool")]); return tree; }, { maxRounds: 100 });
  mounted.unmount(); expect(pending).toHaveLength(0); return nodes;
 }
 const press = (text: string): Step => (nodes) => (btn(nodes, text).props.onClick as () => void)();
@@ -110,4 +110,12 @@ it("does not show a previous owner's late response after the editor unmounts", a
  expect(words(current.value)).toContain("Paper new");
  expect(words(current.value)).not.toContain("Paper a");
  current.unmount();
+});
+
+it("reports unsaved selection until a saved editor is reloaded", async () => {
+ const progress = vi.fn();
+ api.get.mockResolvedValueOnce(editor()).mockResolvedValue({ ...editor(), snapshot: { ...editor().snapshot, seeds: [seed("a"), seed("b")] }, availableAssets: [seed("a"), seed("b")] });
+ await run([rights, file, (n) => expect(words(n)).toContain("ready"), press("Save pool")], progress);
+ expect(progress).toHaveBeenCalledWith({ busy: false, dirty: true });
+ expect(progress).toHaveBeenCalledWith({ busy: false, dirty: false });
 });

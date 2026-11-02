@@ -9,16 +9,16 @@ import type { SeedPaper } from "@/lib/seed-pool/types";
 const MAX_BYTES = 25 * 1024 * 1024;
 type FileResult = { name: string; status: "processing" | "ready" | "failed"; message?: string };
 
-export function SeedPool({ onboarding = false }: { onboarding?: boolean }) {
+export function SeedPool({ onboarding = false, onProgress }: { onboarding?: boolean; onProgress?: (state: { busy: boolean; dirty: boolean }) => void }) {
   const auth = useSyncGate((s) => s.authOutcome);
   const owner = useSyncGate((s) => s.authUserId);
   if (auth === "unknown") return <p>Checking your account…</p>;
   if (auth !== "signed-in" || !owner) return <div><p>Sign in to add seed papers. You can skip this optional step.</p>{auth !== "unconfigured" && <div className="flex gap-3"><button type="button" onClick={() => void signInWithGoogle(onboarding ? "/welcome?step=seed" : "/profile#seed-pool")}>Sign in with Google</button><button type="button" onClick={() => void signInWithGitHub(onboarding ? "/welcome?step=seed" : "/profile#seed-pool")}>Sign in with GitHub</button></div>}</div>;
-  return <OwnerSeedPool key={owner} onboarding={onboarding} />;
+  return <OwnerSeedPool key={owner} onboarding={onboarding} onProgress={onProgress} />;
 }
 
 /** The key at the caller discards the entire editor immediately on account change. */
-export function OwnerSeedPool({ onboarding = false }: { onboarding?: boolean }) {
+export function OwnerSeedPool({ onboarding = false, onProgress }: { onboarding?: boolean; onProgress?: (state: { busy: boolean; dirty: boolean }) => void }) {
   const [editor, setEditor] = useState<SeedPoolEditor | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [rights, setRights] = useState(false);
@@ -29,6 +29,10 @@ export function OwnerSeedPool({ onboarding = false }: { onboarding?: boolean }) 
   const [cleanup, setCleanup] = useState<{ id: string; revision: number } | null>(null);
   const alive = useRef(true);
   const generation = useRef(0);
+  const savedIds = (editor?.pending ?? editor?.snapshot)?.seeds.map((paper) => paper.id) ?? [];
+  const dirty = !!editor && (selected.length !== savedIds.length || selected.some((id) => !savedIds.includes(id)));
+  useEffect(() => { onProgress?.({ busy, dirty }); }, [onProgress, busy, dirty]);
+  useEffect(() => () => onProgress?.({ busy: false, dirty: false }), [onProgress]);
   useEffect(() => {
     alive.current = true;
     const current = ++generation.current;
