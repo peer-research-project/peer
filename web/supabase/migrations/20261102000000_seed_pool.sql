@@ -101,7 +101,8 @@ begin
   if v_count <> coalesce(array_length(p_seed_ids,1),0) then return jsonb_build_object('status','invalid_seed'); end if;
   if v_count <> v_distinct or v_count <> v_hashes then return jsonb_build_object('status','duplicate'); end if;
   select exists(select 1 from public.seed_pool_snapshots where owner_id=p_owner_id and not superseded and effective_date<=v_today) into v_active;
-  select exists(select 1 from public.dashboard_batches where owner_id=p_owner_id and local_date=v_today::text and status in ('served','acknowledged'))
+  select exists(select 1 from public.dashboard_batches where owner_id=p_owner_id and status in ('served','acknowledged') and
+      (local_date=v_today::text or (seed_pool_version is null and (coalesce(served_at,acknowledged_at) at time zone v_zone)::date=v_today)))
     or exists(select 1 from public.briefing_deliveries where user_id=p_owner_id and
       (local_date=v_today::text or (local_date is null and (delivered_at at time zone v_zone)::date=v_today)))
     or exists(select 1 from public.seed_pool_observed_days where owner_id=p_owner_id and local_date=v_today) into v_served;

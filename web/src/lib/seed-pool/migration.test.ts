@@ -59,3 +59,18 @@ it("exposes only owner-scoped opaque incomplete tombstones and retries at curren
   expect(forget.indexOf("v_state.revision is distinct from p_expected_revision")).toBeLessThan(forget.indexOf("v_status='revoked'"));
   expect(forget).toMatch(/where owner_id=p_owner_id and status='revoked' and canonical_key=v_key/i);
 });
+
+
+it("recognizes a served legacy batch on the owner day without counting prepared batches", () => {
+  const fn = body("seed_pool_apply");
+  expect(fn).toMatch(/from public\.dashboard_batches where owner_id=p_owner_id and status in \('served','acknowledged'\) and\s*\(local_date=v_today::text or \(seed_pool_version is null and \(coalesce\(served_at,acknowledged_at\) at time zone v_zone\)::date=v_today\)\)/i);
+  expect(fn.indexOf("from public.dashboard_batches")).toBeLessThan(fn.indexOf("v_target :="));
+  expect(fn).not.toMatch(/created_at\s+at time zone v_zone/i);
+});
+
+it("illustrates the legacy UTC-key versus Tokyo served-day boundary", () => {
+  const instant = new Date("2026-09-24T23:30:00Z");
+  const day = (zone: string) => new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit" }).format(instant);
+  expect(day("UTC")).toBe("2026-09-24");
+  expect(day("Asia/Tokyo")).toBe("2026-09-25");
+});
