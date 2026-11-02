@@ -1966,3 +1966,18 @@ it("builds, atomically serves, and rechecks the server-selected seed snapshot", 
   expect(mocks.runFeedPipeline.mock.calls[0][1]).toMatchObject({ seedSnapshot: snapshot, seedPoolVersion: "server-v" });
   expect(mocks.resolveSeedPool).toHaveBeenCalledTimes(2);
 });
+
+
+it("keeps the no-seed ranking request unchanged while recording its owner day", async () => {
+  vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://example.supabase.co");
+  vi.stubEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY", "public-test-key");
+  vi.stubEnv("PEER_DASHBOARD_LEDGER", "off");
+  mocks.getUser.mockResolvedValue({ data: { user: { id: "owner-seed-test" } } });
+  mocks.resolveSeedPool.mockResolvedValue({ status: "none", schemaInstalled: true, ownerLocalDate: "2026-11-02", timezone: "America/Chicago", snapshot: null, revision: 0, revocationGeneration: 0 });
+  mocks.recordSeedFeedServed.mockResolvedValue({ status: "recorded" });
+  const response = await GET(new NextRequest("http://localhost/api/feed?topics=battery"));
+  expect(response.status).toBe(200);
+  expect(mocks.recordSeedFeedServed).toHaveBeenCalledOnce();
+  expect(mocks.runFeedPipeline.mock.calls[0][1]).not.toHaveProperty("seedSnapshot");
+  expect(mocks.runFeedPipeline.mock.calls[0][1]).not.toHaveProperty("seedPoolVersion");
+});
