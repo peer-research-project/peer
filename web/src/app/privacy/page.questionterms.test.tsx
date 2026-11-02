@@ -6,6 +6,8 @@ import { describe, expect, it } from "vitest";
 import { defaultProfile, type UserProfile } from "@/types";
 import { remoteProfilePayload } from "@/components/profile-sync";
 import { applyQuestionTermSignal } from "@/lib/preferences/ledger";
+import { runFeedPipeline } from "@/lib/feed/pipeline";
+import { ephemeralPaperPoolCache } from "@/lib/opportunities/private-paper-cache";
 import { paperFeedRequestBody } from "@/store/feed";
 import PrivacyPage from "./page";
 
@@ -168,14 +170,26 @@ describe("/privacy — the ledger travels with each request for the briefing (P5
     expect(squash(read("src/lib/preferences/ledger.ts"))).toContain("...cleanedQuestionEvidence(entry.questions),");
   });
 
-  it("nothing of it is kept from the request: the shared pool is scored without it and no log line prints it", () => {
+  it("pool construction excludes the request ledger and no log line prints it", () => {
     const pipeline = squash(read("src/lib/feed/pipeline.ts"));
-    expect(pipeline).toContain("const scored = scorePaperCandidates(fresh, req, brief, false);");
+    // Seeded build-time scoring is owner-scoped; the request ledger is still
+    // excluded there and applied only to that request's read-time ranking.
+    expect(pipeline).toContain("const scored = scorePaperCandidates(fresh, req, brief, false, seedPapers);");
+    expect(pipeline).toContain("const baseCache = privateScope ? (options.cache ?? new PrivatePaperPoolCache(privateScope)) : ephemeralPaperPoolCache;");
+    expect(pipeline).toContain("new SeedFencedPaperPoolCache(baseCache,");
     expect(pipeline).toContain("preferenceLedger: includePreferenceLedger ? req.preferenceLedger : undefined,");
     for (const file of ["src/app/api/feed/route.ts", "src/lib/feed/pipeline.ts"]) {
       const calls = read(file).match(/console\.(?:log|info|warn|error|debug)\([\s\S]*?\);/g) ?? [];
       for (const call of calls) expect(call).not.toMatch(/ledger/i);
     }
+  });
+
+  it("refuses a seed snapshot without an authentic owner scope and never stores unscoped pools", async () => {
+    const snapshot = { version: "v1", effectiveLocalDate: "2026-11-01", revocationGeneration: 0, seeds: [] };
+    await expect(runFeedPipeline({ topics: ["invented topic"], aiTier: 0 }, { seedSnapshot: snapshot, seedTargetLocalDate: "2026-11-01" })).rejects.toThrow("owner-scoped");
+    await expect(runFeedPipeline({ topics: ["invented topic"], aiTier: 0, paperCacheScope: { ownerId: "fake", identity: "fake" } as never }, { seedSnapshot: snapshot, seedTargetLocalDate: "2026-11-01" })).rejects.toThrow("owner-scoped");
+    await ephemeralPaperPoolCache.set("invented-key", {} as never);
+    expect(await ephemeralPaperPoolCache.get("invented-key")).toBeNull();
   });
 
   it("'your briefing' is the paper briefing: nothing asks for a jobs or events lane and no route answers one", () => {
