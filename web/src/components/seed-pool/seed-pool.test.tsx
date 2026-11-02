@@ -94,3 +94,20 @@ it("rejects a response without extracted facets and cannot save an empty initial
  await run([rights, file, (n) => { expect(words(n)).toContain("No usable text was recognized"); expect(btn(n, "Save pool").props.disabled).toBe(true); }]);
  expect(api.save).not.toHaveBeenCalled();
 });
+
+
+it("does not show a previous owner's late response after the editor unmounts", async () => {
+ let release!: (value: unknown) => void;
+ api.get.mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
+ const old = await hookRuntime.mount(() => OwnerSeedPool({}));
+ old.unmount();
+ const next = { ...editor(), snapshot: { ...editor().snapshot, seeds: [seed("new")] }, availableAssets: [seed("new")] };
+ api.get.mockResolvedValueOnce(next);
+ const current = await hookRuntime.mount(() => OwnerSeedPool({}));
+ expect(words(current.value)).toContain("Paper new");
+ release(editor());
+ await new Promise((resolve) => setTimeout(resolve, 0));
+ expect(words(current.value)).toContain("Paper new");
+ expect(words(current.value)).not.toContain("Paper a");
+ current.unmount();
+});
