@@ -301,7 +301,7 @@ describe("buildReading", () => {
     // P8-04 for HTML), so a reading cached under 6 is read again.
     // P9: 7 -> 8 — no field added; the PDF text and the cleaner changed
     // (P9-08 / P9-09 / P9-10), so a reading cached under 7 is read again.
-    expect(reading.version).toBe(18);
+    expect(reading.version).toBe(19);
     expect(reading.paperId).toBe("openalex:W7204479535");
     expect(reading.builtAt).toBe("2026-09-06T12:00:00.000Z");
     expect(reading.provenance).toEqual({
@@ -635,14 +635,14 @@ describe("describeAvailability", () => {
 
   it("no abstract, with and without a TLDR", () => {
     expect(describeAvailability({ reading: noAbstract, ...noModel })).toEqual([
-      "No abstract is published where Peer can read it — only the record. Open it at the source to judge it.",
+      "Peer could not retrieve an abstract — only the record. Open it at the source to judge it.",
     ]);
     const withTldr: PaperReading = {
       ...noAbstract,
       provenance: { ...noAbstract.provenance, tldr: "A diffusion model for knowledge tracing." },
     };
     expect(describeAvailability({ reading: withTldr, ...noModel })).toEqual([
-      "No abstract is published where Peer can read it. The one-line TLDR above is Semantic Scholar's, not the authors'.",
+      "Peer could not retrieve an abstract. The one-line TLDR above is Semantic Scholar's, not the authors'.",
     ]);
   });
 
@@ -1195,4 +1195,12 @@ describe("buildReading — an abstract sentence is one line (P10-40, BACKLOG-38)
     expect(reading.provenance.abstractSentences).toBe(reading.abstract.sentences.length);
     expect(reading.abstract.sentences).toEqual(["One sentence split over lines.", "A second one."]);
   });
+});
+
+
+it("does not assert legacy abstract provenance when no abstract was read", () => {
+  const reading = buildReading({ ...normalPaper, summaryIntro: "", summaryResultDiscussion: "" }, null);
+  const text = describeAvailability({ reading, report: { basis: "model-abstract", droppedClaims: 0 }, providerConfigured: true, profileHasProject: true, modelFailed: false }).join(" ");
+  expect(text).toContain("abstract is unavailable");
+  expect(text).not.toContain("Read by your model from the abstract");
 });

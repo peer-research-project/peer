@@ -155,7 +155,7 @@ export interface PaperReading {
    * 14 → 16: PDFs with narrow column gutters are re-extracted in reading order;
    * cached passages use the previous extraction and need to be refreshed.
    */
-  version: 18;
+  version: 19;
   paperId: string;
   builtAt: string;
   provenance: ReadingProvenance;
@@ -811,7 +811,7 @@ export function buildReading(
   omitted.push({ block: "nextStep", reason: "needs_key" });
 
   return {
-    version: 18,
+    version: 19,
     paperId: paper.id,
     builtAt: now.toISOString(),
     provenance,
@@ -844,7 +844,7 @@ export function omittedForReader(
       return { ...entry, reason: "no_profile" };
     }
     if (
-      report?.basis === "model-abstract" &&
+      report?.basis === "model-abstract" && reading.provenance.abstract !== "none" &&
       (entry.block === "caveats" || entry.block === "nextStep")
     ) {
       return { ...entry, reason: "needs_full_text" };
@@ -900,9 +900,9 @@ function capitalize(text: string): string {
 }
 
 const NO_ABSTRACT =
-  "No abstract is published where Peer can read it — only the record. Open it at the source to judge it.";
+  "Peer could not retrieve an abstract — only the record. Open it at the source to judge it.";
 const NO_ABSTRACT_TLDR =
-  "No abstract is published where Peer can read it. The one-line TLDR above is Semantic Scholar's, not the authors'.";
+  "Peer could not retrieve an abstract. The one-line TLDR above is Semantic Scholar's, not the authors'.";
 const PROFILE_EMPTY =
   "Add your current project in Profile and Peer will relate this paper to it.";
 const MODEL_FAILED =
@@ -983,7 +983,7 @@ function readingSentence(reading: PaperReading, providerConfigured: boolean, key
         : " with no methods section";
     const lead =
       provenance.abstract === "none"
-        ? "No abstract is published where Peer can read it, but the full text was:"
+        ? "Peer could not retrieve an abstract, but the full text was:"
         : "Full text read:";
     return withKey(`${lead} ${sourcePhrase(provenance)}${qualifier}. ${presentSentence(reading)}`);
   }
@@ -1069,7 +1069,9 @@ function fullTextClause(reading: PaperReading, report: AvailabilityReport): stri
 
 function modelSentence(reading: PaperReading, report: AvailabilityReport): string {
   let sentence: string;
-  if (report.basis === "model-abstract") {
+  if (report.basis === "model-abstract" && reading.provenance.abstract === "none") {
+    sentence = "The abstract is unavailable, so Peer cannot verify that this report was read from it.";
+  } else if (report.basis === "model-abstract") {
     sentence =
       "Read by your model from the abstract; every claim below carries a sentence from it.";
     if (reading.caveats.length === 0) sentence += fullTextClause(reading, report);

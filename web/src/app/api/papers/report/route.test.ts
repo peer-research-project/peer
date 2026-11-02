@@ -802,3 +802,31 @@ describe("POST /api/papers/report — the figure binder is told whose PDF it is"
     expect(mocks.bindFiguresToReport.mock.calls[0][0].paper).toEqual({ title: paper.title, id: uploadId });
   });
 });
+
+
+describe("missing source text", () => {
+  const emptyPaper = { ...paper, summaryIntro: "  ", summaryResultDiscussion: "" };
+  it.each(["application/json", "application/x-ndjson"])("never calls a shallow model, even after a deep failure (%s)", async (accept) => {
+    const generateJsonText = vi.fn();
+    mocks.resolveProvider.mockReturnValue({ generateJsonText });
+    mocks.getFullText.mockResolvedValue({ status: "not_found", attempts: [] });
+    for (const deepReport of [false, true]) {
+      const response = await POST(request({ paper: emptyPaper, deepReport }, accept));
+      const result = accept.includes("ndjson") ? reportEvent(await readEvents(response)) : await response.json();
+      expect(result.noLlm).toBe(true);
+      expect(result.paywallNotice ?? "").not.toContain("Showing an abstract-only report");
+    }
+    expect(generateJsonText).not.toHaveBeenCalled();
+    expect(mocks.generateDeepReport).not.toHaveBeenCalled();
+  });
+  it.each(["application/json", "application/x-ndjson"])("allows a real deep read without an abstract (%s)", async (accept) => {
+    mocks.resolveProvider.mockReturnValue({ generateJsonText: vi.fn() });
+    mocks.getFullText.mockResolvedValue({ status: "ok", doc: { text: "Readable body." }, attempts: [] });
+    mocks.getFigurePool.mockResolvedValue(null);
+    mocks.generateDeepReport.mockResolvedValue(generatedReport);
+    mocks.bindFiguresToReport.mockImplementation((r: PaperReport) => r);
+    const response = await POST(request({ paper: emptyPaper, deepReport: true }, accept));
+    if (accept.includes("ndjson")) await readEvents(response); else await response.json();
+    expect(mocks.generateDeepReport).toHaveBeenCalledTimes(1);
+  });
+});

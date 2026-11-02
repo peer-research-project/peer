@@ -25,7 +25,7 @@ import { REPORT_STATUS } from "./copy";
 // replaces .novelty) and deleted "why it fits you" — a v5 report still has
 // the old two-block/fit shape and would render it for up to DEEP_TTL_MS
 // after upgrade without this bump.
-const STORAGE_KEY = "peer-paper-report-v7";
+const STORAGE_KEY = "peer-paper-report-v8";
 /** The cache the old page kept, with its fabricated fallbacks inside. */
 const LEGACY_STORAGE_KEYS = ["peer-paper-report-cache-v3", "peer-paper-report-v4", "peer-paper-report-v5", "peer-paper-report-v6"];
 const MAX_ENTRIES = 40;
@@ -237,14 +237,14 @@ function hash(text: string): string {
  * attachment, so the key is unchanged for the vast majority of papers.
  */
 export function buildReportKey(
-  paper: Pick<Paper, "id" | "fullTextUploadId" | "revision"> | undefined,
+  paper: (Pick<Paper, "id" | "fullTextUploadId" | "revision"> & Partial<Pick<Paper, "summaryIntro" | "summaryResultDiscussion">>) | undefined,
   depth: "deep" | "abstract",
   project: string,
   provider: string,
   questions: readonly string[] = [],
 ): string {
   if (!paper) return "";
-  const base = `${paper.id}|${paper.fullTextUploadId ?? "public"}|${paper.revision ?? ""}|${depth}|${hash(project)}|${provider}`;
+  const base = `${paper.id}|${paper.fullTextUploadId ?? "public"}|${paper.revision ?? ""}|${depth}|${hash(project)}|${provider}|source:${hash(JSON.stringify([paper.summaryIntro ?? "", paper.summaryResultDiscussion ?? ""]))}`;
   // P2-03 (§1g.11 b): a report answers a set of questions — in any order —
   // so the set names it too, as a hash; with none the key is today's, and
   // every report already cached stays found.

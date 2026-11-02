@@ -346,6 +346,12 @@ export function verifyReportEvidence(
     },
   };
 
+  if (entries.length === 0) {
+    verified.whatItProposes.summary = "";
+    delete verified.whatItProposes.newHere;
+    verified.resultsAndSignificance.summary = "";
+  }
+
   if (report.limitations) verified.limitations = keepAll(report.limitations);
 
   if (report.relationToYourWork) {

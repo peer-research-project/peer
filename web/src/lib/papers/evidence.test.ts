@@ -1040,3 +1040,12 @@ describe("verifyReportEvidence shows each kept quote to its sentence boundaries 
     expect(placeEvidence(`…${whole.slice(4)}…`, sentences)).toEqual({ kind: "mark", index: 1 });
   });
 });
+
+
+it("removes unsupported plain summaries and novelty when there is no corpus", () => {
+  const input = report({ whatItProposes: { summary: "Invented proposal", methods: [], newHere: ["Invented novelty"] }, resultsAndSignificance: { summary: "Invented finding", keyResults: [] } });
+  const verified = verifyReportEvidence(input, { abstract: "   " }).report;
+  expect(verified.whatItProposes.summary).toBe("");
+  expect(verified.whatItProposes.newHere).toBeUndefined();
+  expect(verified.resultsAndSignificance.summary).toBe("");
+});

@@ -14,7 +14,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { Paper } from "@/types";
 import { buildReading, type PaperReading } from "@/lib/papers/reading";
 
-const STORAGE_KEY = "peer-reading-v2";
+const STORAGE_KEY = "peer-reading-v3";
 const MAX_ENTRIES = 40;
 const TTL_MS = 24 * 60 * 60 * 1000;
 /** The shape both gates below accept. Typed from the document itself, so
@@ -28,7 +28,7 @@ const TTL_MS = 24 * 60 * 60 * 1000;
  *  old full reading (P8-04). The version in the URL moves the cache's key with
  *  the bump, so an old body is never served to a newer client. The route
  *  ignores the parameter. */
-export const READING_VERSION: PaperReading["version"] = 18;
+export const READING_VERSION: PaperReading["version"] = 19;
 
 type ReadingCache = Record<string, { reading: PaperReading; ts: number }>;
 
@@ -40,12 +40,21 @@ type ReadingCache = Record<string, { reading: PaperReading; ts: number }>;
  * was built against. `undefined` for every paper without a private
  * attachment, so the key is unchanged for the vast majority of papers.
  */
+export function fingerprintReadingSource(paper: Pick<Paper, "summaryIntro" | "summaryResultDiscussion">): string {
+  if (!paper.summaryIntro && !paper.summaryResultDiscussion) return "";
+  const source = JSON.stringify([paper.summaryIntro ?? "", paper.summaryResultDiscussion ?? ""]);
+  let h = 5381;
+  for (let i = 0; i < source.length; i += 1) h = ((h << 5) + h + source.charCodeAt(i)) | 0;
+  return (h >>> 0).toString(36);
+}
+
 export function buildReadingKey(
   paperId: string | undefined,
   uploadId: string | undefined,
   revision: number | undefined,
+  sourceFingerprint = "",
 ): string {
-  return `${paperId ?? ""}|${uploadId ?? "public"}|${revision ?? ""}`;
+  return `${paperId ?? ""}|${uploadId ?? "public"}|${revision ?? ""}${sourceFingerprint ? `|source:${sourceFingerprint}` : ""}`;
 }
 
 // Every touch of localStorage is wrapped: a private window, a full quota or
@@ -112,7 +121,8 @@ export function useReading(paper: Paper | undefined): {
   }, []);
   const uploadId = paper?.fullTextUploadId;
   const privatePdf = !!uploadId || !!paperId?.startsWith("upload:");
-  const readingKey = buildReadingKey(paperId, uploadId, paper?.revision);
+  const sourceFingerprint = paper ? fingerprintReadingSource(paper) : "";
+  const readingKey = buildReadingKey(paperId, uploadId, paper?.revision, sourceFingerprint);
 
   // Synchronous and complete: the page the reader sees before any request.
   const reading0 = useMemo(() => (paper ? buildReading(paper, null) : null), [paper]);
@@ -139,7 +149,7 @@ export function useReading(paper: Paper | undefined): {
       if (controller.signal.aborted) return;
       try {
         // `v` first, so a private request keeps its `upload` parameter after it.
-        const res = await fetch(`/api/papers/${encodeURIComponent(paperId)}/reading?v=${READING_VERSION}${uploadId ? `&upload=${encodeURIComponent(uploadId)}` : ""}`, {
+        const res = await fetch(`/api/papers/${encodeURIComponent(paperId)}/reading?v=${READING_VERSION}${sourceFingerprint ? `&source=${sourceFingerprint}` : ""}${uploadId ? `&upload=${encodeURIComponent(uploadId)}` : ""}`, {
           signal: controller.signal,
         });
         if (!res.ok) throw new Error(`reading HTTP ${res.status}`);
@@ -164,7 +174,7 @@ export function useReading(paper: Paper | undefined): {
       }
     })();
     return () => controller.abort();
-  }, [paperId, cached, uploadId, privatePdf, readingKey]);
+  }, [paperId, cached, uploadId, privatePdf, readingKey, sourceFingerprint]);
 
   const server = fetched && fetched.id === readingKey ? fetched.reading : null;
   const reading = server ?? cached ?? reading0;
