@@ -380,7 +380,7 @@ it("never writes a built pool when its seed version changed during build", async
   const { repo, job } = await claimedJob();
   const resolveSeeds = vi.fn(async () => ({ status: "none" as const, schemaInstalled: true, ownerLocalDate: job.localDate, timezone: "America/Chicago", snapshot: null, revision: 1, revocationGeneration: 1 }));
   const putSeedBatch = vi.fn();
-  const buildPool = vi.fn(async () => ({ ok: true as const, papers: SAMPLE_PAPERS, seedContext: { kind: "ready" as const, localDate: job.localDate, version: "old", revocationGeneration: 0, snapshot: null } }));
+  const buildPool = vi.fn(async () => ({ ok: true as const, papers: SAMPLE_PAPERS, seedContext: { kind: "ready" as const, localDate: job.localDate, version: "old", revocationGeneration: 1, snapshot: null } }));
   const outcome = await runPrepareJob(job, makeDeps({ jobs: repo, resolveSeeds, putSeedBatch, buildPool }));
   expect(outcome.kind).toBe("failed");
   expect(putSeedBatch).not.toHaveBeenCalled();
