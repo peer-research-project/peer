@@ -1836,7 +1836,9 @@ export async function runFeedPipeline(
   // are request-local, and scoped requests use an owner-qualified store.
   if ((options.seedSnapshot || options.seedPoolVersion !== undefined) && !privateScope) throw new Error("Seed pool requires an owner-scoped paper cache");
   const seedPapers = (options.seedSnapshot?.seeds ?? []).filter(hasUsableSeed);
-  const cache = privateScope
+  // Until the owner-locked cache write is available, never persist a pool
+  // built from seed material: a concurrent forget could otherwise resurrect it.
+  const cache = seedPapers.length ? ephemeralPaperPoolCache : privateScope
     ? (options.cache ?? new PrivatePaperPoolCache(privateScope))
     : ephemeralPaperPoolCache;
 

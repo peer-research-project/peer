@@ -287,7 +287,7 @@ async function runLedgerAwareFeed(
   const ownerId = paperCacheScope.ownerId;
   const seedContext = seedOutputContext(await resolveSeedPool(ownerId, { now }));
   if (seedContext.kind === "unavailable") return { unavailable: true };
-  const seedOptions = seedContext.kind === "ready" ? {
+  const seedOptions = seedContext.kind === "ready" && seedContext.version !== "none" ? {
     seedSnapshot: seedContext.snapshot ?? undefined,
     seedPoolVersion: seedContext.version,
     seedRevocationGeneration: seedContext.revocationGeneration,
@@ -430,7 +430,7 @@ async function runLedgerAwareFeed(
   const wonMintRace =
     minted.papers.length === papers.length &&
     minted.papers.every((p, i) => p.key === papers[i].key);
-  if (wonMintRace) {
+  if (wonMintRace && (seedContext.kind === "legacy" || seedContext.version === "none")) {
     const presentedIds = new Set(result.items.map((item) => item.id));
     // `finalPool` is only present because `includeFinalPool: true` was
     // passed above -- defensively defaults to [] rather than assuming it.
