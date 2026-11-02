@@ -35,4 +35,11 @@ describe("seed migration source invariants (not a PostgreSQL runtime test)", () 
     expect(fnBody).toContain("p_expected_revocation_generation");
   });
 
+  it("grants owner-scoped reads without granting browser mutation", () => {
+    for (const table of ["seed_pool_state", "seed_pool_assets", "seed_pool_snapshots"]) {
+      expect(sql).toContain(`create policy seed_pool_owner_read on public.${table} for select to authenticated using (auth.uid()=owner_id)`);
+    }
+    expect(sql).not.toMatch(/grant\s+(?:insert|update|delete|all)[^;]*\bto\s+authenticated/i);
+  });
+
 });

@@ -45,7 +45,14 @@ alter table public.seed_pool_state enable row level security;
 alter table public.seed_pool_assets enable row level security;
 alter table public.seed_pool_snapshots enable row level security;
 revoke all on public.seed_pool_state, public.seed_pool_assets, public.seed_pool_snapshots from public, anon, authenticated;
--- Clients use authenticated server routes; no client can inject feature JSON.
+-- Owners may read only their own records; writes and feature creation remain service-only.
+drop policy if exists seed_pool_owner_read on public.seed_pool_state;
+create policy seed_pool_owner_read on public.seed_pool_state for select to authenticated using (auth.uid()=owner_id);
+drop policy if exists seed_pool_owner_read on public.seed_pool_assets;
+create policy seed_pool_owner_read on public.seed_pool_assets for select to authenticated using (auth.uid()=owner_id);
+drop policy if exists seed_pool_owner_read on public.seed_pool_snapshots;
+create policy seed_pool_owner_read on public.seed_pool_snapshots for select to authenticated using (auth.uid()=owner_id);
+grant select on public.seed_pool_state, public.seed_pool_assets, public.seed_pool_snapshots to authenticated;
 grant select, insert, update, delete on public.seed_pool_state, public.seed_pool_assets, public.seed_pool_snapshots to service_role;
 alter table public.dashboard_batches add column if not exists seed_pool_version text;
 alter table public.dashboard_batches add column if not exists seed_revocation_generation bigint not null default 0;
