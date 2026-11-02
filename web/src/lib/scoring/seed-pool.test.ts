@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { RawItem } from "@/lib/sources/types";
 import { scoreItems } from "./combine";
+import { applyPreferenceSignal, preferenceKey } from "@/lib/preferences/ledger";
 import type { MatchingSeed } from "@/lib/seed-pool/scoring";
 const now = Date.parse("2026-10-10T00:00:00Z");
 const seed: MatchingSeed = { id: "seed", canonicalKey: "doi:1", features: { topic: ["forest canopy"], object: ["rainforest tree"], method: ["satellite imaging"] } };
@@ -23,4 +24,17 @@ describe("seed scoring", () => {
     const unrelated = [item("x", "Satellite imaging of distant galaxies")];
     expect(scoreItems(unrelated, { topics: ["lithium battery"] }, undefined, now, [seed])).toEqual([]);
   });
+});
+
+
+it("retains gradual negative feedback once with a seed", () => {
+  const concept = { key: preferenceKey("satellite imaging", "openalex_topic", "T123"), label: "satellite imaging", source: "openalex_topic" as const };
+  let ledger = applyPreferenceSignal(undefined, [concept], "negative", { at: "2026-10-10T00:00:00.000Z" });
+  ledger = applyPreferenceSignal(ledger, [concept], "negative", { at: "2026-10-10T00:00:00.000Z" });
+  const candidate = { ...item("a", "Forest canopy and rainforest tree by satellite imaging"), metadata: { preferenceSignals: [concept] } };
+  const profile = { topics: ["forest canopy"] };
+  const baseline = scoreItems([candidate], profile, undefined, now, [seed])[0];
+  const disliked = scoreItems([candidate], { ...profile, preferenceLedger: ledger }, undefined, now, [seed])[0];
+  expect(disliked.score).toBeLessThan(baseline.score);
+  expect(disliked.score).toBeGreaterThan(0);
 });

@@ -186,7 +186,7 @@ export function scoreItems(
   // seed branch blends it once, separately from intent and source/recency.
   const positiveEntries = Object.entries(profile.preferenceLedger ?? {}).filter(([, entry]) => entry.positive > 0);
   const explicitFeedback = positiveEntries.length > 0 ? prepareLedger(Object.fromEntries(
-    positiveEntries.map(([key, entry]) => [key, { ...entry, uploads: undefined, questions: undefined, negative: 0 }]),
+    positiveEntries.map(([key, entry]) => [key, { ...entry, uploads: undefined, questions: undefined }]),
   )) : undefined;
   const seedEnabled = seedPapers.some(hasUsableSeed);
 
@@ -407,7 +407,7 @@ export function scoreItems(
     }) : null;
     const combined = seedEnabled
       ? mixSeedScore(seedMatches[0]?.score ?? 0, ((kw.score + tf) / 2) * senseContextPenalty,
-          explicit ? clamp01(explicit.boost / 0.18) : null, (rc + sr) / 2)
+          explicit ? clamp01(explicit.boost / 0.18) : null, (rc + sr) / 2) * preference.penalty
       : clamp01(base * preference.penalty * senseContextPenalty + softBonus + preference.boost);
     const breakdown: ScoreBreakdown = {
       keyword: kw.score,
