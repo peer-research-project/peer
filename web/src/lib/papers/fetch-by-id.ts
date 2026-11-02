@@ -11,6 +11,8 @@ import { paperToRawItem, type S2Paper } from "@/lib/sources/semantic-scholar";
 
 const MAILTO = process.env.OPENALEX_EMAIL ?? "peer@example.com";
 
+export class PaperLookupUnavailable extends Error {}
+
 async function fetchOpenAlexPaper(workId: string): Promise<RawItem | null> {
   const url = `https://api.openalex.org/works/${encodeURIComponent(workId)}?mailto=${encodeURIComponent(MAILTO)}`;
   try {
@@ -18,8 +20,10 @@ async function fetchOpenAlexPaper(workId: string): Promise<RawItem | null> {
       signal: AbortSignal.timeout(8000),
       next: { revalidate: 3600 },
     });
-    if (!res.ok) return null;
+    if (res.status === 404) return null;
+    if (!res.ok) throw new PaperLookupUnavailable("OpenAlex unavailable");
     const work = (await res.json()) as OpenAlexWork;
+    if (!work || typeof work.id !== "string" || work.id.split("/").pop()?.toLowerCase() !== workId.toLowerCase() || typeof work.title !== "string" || !work.title.trim()) throw new PaperLookupUnavailable("Invalid OpenAlex record");
     const item = openAlexWorkToRawItem(work);
 
     if (!item.abstract) {
@@ -30,8 +34,8 @@ async function fetchOpenAlexPaper(workId: string): Promise<RawItem | null> {
     }
     return item;
   } catch (err) {
-    console.error("[papers/by-id] openalex error:", err);
-    return null;
+    if (err instanceof PaperLookupUnavailable) throw err;
+    throw new PaperLookupUnavailable("OpenAlex unavailable");
   }
 }
 
@@ -60,7 +64,8 @@ async function fetchArxivPaper(arxivId: string): Promise<RawItem | null> {
       signal: AbortSignal.timeout(8000),
       next: { revalidate: 3600 },
     });
-    if (!res.ok) return null;
+    if (res.status === 404) return null;
+    if (!res.ok) throw new PaperLookupUnavailable("arXiv unavailable");
     const xml = await res.text();
     const parser = new XMLParser({
       ignoreAttributes: false,
@@ -68,8 +73,10 @@ async function fetchArxivPaper(arxivId: string): Promise<RawItem | null> {
     });
     const parsed = parser.parse(xml);
     const entries: ArxivEntry[] = asArray(parsed?.feed?.entry);
-    if (entries.length === 0) return null;
+    if (entries.length !== 1) throw new PaperLookupUnavailable("Invalid arXiv record");
     const e = entries[0];
+    const returnedId = typeof e.id === "string" ? e.id.split("/abs/")[1]?.replace(/v\d+$/, "") : undefined;
+    if (returnedId !== arxivId.replace(/v\d+$/, "") || typeof e.title !== "string" || !e.title.trim()) throw new PaperLookupUnavailable("Invalid arXiv record");
     const authors = asArray(e.author).map((a) => cleanDisplayText(a.name)).filter(Boolean);
     const categories = asArray(e.category).map((c) => cleanDisplayText(c["@_term"])).filter(Boolean);
     const links = asArray(e.link);
@@ -90,12 +97,10 @@ async function fetchArxivPaper(arxivId: string): Promise<RawItem | null> {
       },
     };
   } catch (err) {
-    console.error("[papers/by-id] arxiv error:", err);
-    return null;
+    if (err instanceof PaperLookupUnavailable) throw err;
+    throw new PaperLookupUnavailable("arXiv unavailable");
   }
 }
-
-export class PaperLookupUnavailable extends Error {}
 
 async function fetchSemanticScholarPaper(id: string): Promise<RawItem | null> {
   if (!/^[a-f0-9]{40}$/i.test(id)) return null;

@@ -13,7 +13,7 @@ import { fetchAbstract, fetchSemanticScholarText, publisherAbstract, retrieveAbs
 import { fetchPaperById } from "./fetch-by-id";
 
 /** A fetch that answers Semantic Scholar with one fixed record and everything else with 404. */
-function stubFetch(s2: Record<string, unknown>, openAlexWork: unknown = { id: "W1" }) {
+function stubFetch(s2: Record<string, unknown>, openAlexWork: unknown = { id: "W1", title: "A paper" }) {
   const fetchMock = vi.fn(async (input: string | URL | Request) => {
     const url = String(input);
     if (url.startsWith("https://api.semanticscholar.org/")) {
@@ -109,7 +109,7 @@ describe("bounded abstract enrichment", () => {
     const calls: string[] = [];
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
       const url = String(input); calls.push(url);
-      if (url.includes("api.openalex.org")) return Response.json({ id: "W1" });
+      if (url.includes("api.openalex.org")) return Response.json({ id: "W1", title: "A paper" });
       if (url.includes("semanticscholar.org")) return Response.json({ abstract: null, tldr: { text: "Machine summary." } });
       if (url.includes("api.crossref.org")) return Response.json({ message: {} });
       return new Response(`<meta name="citation_abstract" content="${abstract}">`);
