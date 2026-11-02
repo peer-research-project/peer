@@ -38,7 +38,8 @@ import {
 import { classifySendFailure } from "@/lib/email/send-failure";
 import { serializeFeedIntent } from "@/lib/feed/intent";
 import { dashboardLedgerEnabled } from "@/lib/dashboard/ledger-flag";
-import { dateInTimezone } from "@/lib/dashboard/timezone";
+import { dateInTimezone, utcInstantForLocalWallClock } from "@/lib/dashboard/timezone";
+import { nextLocalDate } from "@/lib/seed-pool/state";
 import { seedOutputContext } from "@/lib/seed-pool/output";
 import { isOwnerDueForPrepare, PREPARE_LEAD_MINUTES, PREPARE_LOOKAHEAD_MS } from "@/lib/dashboard/due-owners";
 import { createPrepareAheadBuildPool, PROFILE_COLUMNS } from "@/lib/dashboard/prepare-pool";
@@ -245,38 +246,44 @@ async function runDueSelectionAndEnqueue(
       bumpReason(skippedReasons, "intent_required");
       continue;
     }
-    try {
-      // Installed seed schema shares the owner's check-in calendar date with
-      // web and email. Explicitly absent schema keeps the legacy server key.
-      let batchDate = dueCheck.batchLocalDate;
-      if (deps.resolveSeeds) {
-        const ownerDate = dateInTimezone(dueCheck.checkinInstant, row.digest_timezone);
-        if (!ownerDate) { bumpReason(skippedReasons, "timezone_unresolved"); continue; }
-        const resolution = await deps.resolveSeeds(row.user_id, ownerDate, now);
-        const context = seedOutputContext(resolution, ownerDate);
-        if (context.kind === "unavailable" || (context.kind === "ready" && resolution.timezone !== row.digest_timezone)) {
-          bumpReason(skippedReasons, "seed_pool_unavailable"); continue;
-        }
-        if (context.kind === "ready") batchDate = ownerDate;
+    // The legacy selector also keeps overdue same-day work. For installed
+    // seed pools, add tomorrow's check-in when its preparation window opens
+    // before local midnight; resolve its snapshot for that future date.
+    const candidates = [{ checkin: dueCheck.checkinInstant, dueAt: dueCheck.dueAt, legacyDate: dueCheck.batchLocalDate, future: false }];
+    const currentOwnerDate = dateInTimezone(dueCheck.checkinInstant, row.digest_timezone);
+    const tomorrow = currentOwnerDate ? nextLocalDate(currentOwnerDate) : null;
+    const nextCheckin = tomorrow ? utcInstantForLocalWallClock(tomorrow, row.digest_hour_local, row.digest_timezone) : null;
+    if (nextCheckin) {
+      const nextDue = new Date(nextCheckin.getTime() - PREPARE_LEAD_MINUTES * 60_000);
+      if (nextCheckin.getTime() > now.getTime() && nextDue.getTime() < now.getTime() + PREPARE_LOOKAHEAD_MS) {
+        candidates.push({ checkin: nextCheckin, dueAt: nextDue, legacyDate: dueCheck.batchLocalDate, future: true });
       }
-      await deps.jobs.enqueue(
-        {
+    }
+    for (const candidate of candidates) {
+      try {
+        let batchDate = candidate.legacyDate;
+        if (deps.resolveSeeds) {
+          const ownerDate = dateInTimezone(candidate.checkin, row.digest_timezone);
+          if (!ownerDate) { bumpReason(skippedReasons, "timezone_unresolved"); continue; }
+          const resolution = await deps.resolveSeeds(row.user_id, ownerDate, now);
+          const context = seedOutputContext(resolution, ownerDate);
+          if (context.kind === "unavailable" || (context.kind === "ready" && resolution.timezone !== row.digest_timezone)) {
+            bumpReason(skippedReasons, "seed_pool_unavailable"); continue;
+          }
+          if (context.kind === "ready") batchDate = ownerDate;
+          else if (candidate.future) continue;
+        } else if (candidate.future) continue;
+        await deps.jobs.enqueue({
           ownerId: row.user_id,
           localDate: batchDate,
           intentVersion: serializeFeedIntent(normalized.request.intent),
-          nextAttemptAt: dueCheck.dueAt,
-        },
-        now,
-      );
-      enqueued++;
-    } catch (err) {
-      bumpReason(enqueueFailedReasons, "enqueue_error");
-      logJobIssue(
-        "jobs/prepare-dashboards",
-        row.user_id,
-        "enqueue_error",
-        err instanceof Error ? err.message : String(err),
-      );
+          nextAttemptAt: candidate.dueAt,
+        }, now);
+        enqueued++;
+      } catch (err) {
+        bumpReason(enqueueFailedReasons, "enqueue_error");
+        logJobIssue("jobs/prepare-dashboards", row.user_id, "enqueue_error", err instanceof Error ? err.message : String(err));
+      }
     }
   }
 

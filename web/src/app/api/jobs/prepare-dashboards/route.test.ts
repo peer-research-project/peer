@@ -644,3 +644,58 @@ it("keeps the server-date job key only when the seed schema is explicitly absent
   expect(await jobs.getByOwnerDate(OWNER, "2026-09-24")).not.toBeNull();
   expect(await jobs.getByOwnerDate(OWNER, "2026-09-25")).toBeNull();
 });
+
+
+it("prepares tomorrow's pending pool before owner midnight when the next check-in is soon after midnight", async () => {
+  enableCycle(); vi.stubEnv("TZ", "UTC");
+  const now = new Date("2026-09-24T14:15:00.000Z"); // 23:15 Tokyo
+  const jobs = new MemoryDashboardPrepareJobRepository();
+  const resolveSeeds = vi.fn(async (_owner: string, date: string) => ({ status: "none" as const, schemaInstalled: true, ownerLocalDate: "2026-09-24", timezone: "Asia/Tokyo", snapshot: { version: date === "2026-09-25" ? "pending-v" : "active-v", effectiveLocalDate: date, seeds: [], revocationGeneration: 0 }, revision: 2, revocationGeneration: 0 }));
+  const deps = makeDeps({ fetchDueProfiles: vi.fn(async () => [baseRow({ digest_hour_local: 0, digest_timezone: "Asia/Tokyo" })]), jobs, resolveSeeds, maxJobsPerRun: 0 });
+  await runDashboardPrepareCycle(deps, now);
+  expect(resolveSeeds).toHaveBeenCalledWith(OWNER, "2026-09-25", now);
+  const nextResult = resolveSeeds.mock.results[1]?.value;
+  expect((await nextResult)?.snapshot?.version).toBe("pending-v");
+  const future = await jobs.getByOwnerDate(OWNER, "2026-09-25");
+  expect(future).not.toBeNull();
+  expect(future?.nextAttemptAt).toBe("2026-09-24T13:30:00.000Z");
+});
+
+
+it("uses the next owner calendar date across spring DST, before midnight", async () => {
+  enableCycle(); vi.stubEnv("TZ", "UTC");
+  const now = new Date("2026-03-08T05:15:00.000Z"); // 23:15 on March 7 in Chicago
+  const jobs = new MemoryDashboardPrepareJobRepository();
+  const resolveSeeds = vi.fn(async (_owner: string, date: string) => ({ status: "none" as const, schemaInstalled: true, ownerLocalDate: "2026-03-07", timezone: "America/Chicago", snapshot: { version: date === "2026-03-08" ? "pending-dst" : "active", effectiveLocalDate: date, seeds: [], revocationGeneration: 0 }, revision: 2, revocationGeneration: 0 }));
+  const deps = makeDeps({ fetchDueProfiles: vi.fn(async () => [baseRow({ digest_hour_local: 0, digest_timezone: "America/Chicago" })]), jobs, resolveSeeds, maxJobsPerRun: 0 });
+  await runDashboardPrepareCycle(deps, now);
+  expect(resolveSeeds).toHaveBeenCalledWith(OWNER, "2026-03-08", now);
+  expect((await resolveSeeds.mock.results[1].value).snapshot.version).toBe("pending-dst");
+  const future = await jobs.getByOwnerDate(OWNER, "2026-03-08");
+  expect(future?.nextAttemptAt).toBe("2026-03-08T04:30:00.000Z");
+});
+
+it("does not add tomorrow's job to the explicit legacy path", async () => {
+  enableCycle(); vi.stubEnv("TZ", "UTC");
+  const now = new Date("2026-09-24T14:15:00.000Z");
+  const jobs = new MemoryDashboardPrepareJobRepository();
+  const resolveSeeds = vi.fn(async () => ({ status: "none" as const, schemaInstalled: false, ownerLocalDate: null, timezone: null, snapshot: null, revision: 0, revocationGeneration: 0 }));
+  const deps = makeDeps({ fetchDueProfiles: vi.fn(async () => [baseRow({ digest_hour_local: 0, digest_timezone: "Asia/Tokyo" })]), jobs, resolveSeeds, maxJobsPerRun: 0 });
+  await runDashboardPrepareCycle(deps, now);
+  expect(await jobs.getByOwnerDate(OWNER, "2026-09-25")).toBeNull();
+  expect(await jobs.getByOwnerDate(OWNER, "2026-09-23")).not.toBeNull();
+});
+
+
+it("fences tomorrow's prepared batch with the future pool version before midnight", async () => {
+  enableCycle(); vi.stubEnv("TZ", "UTC");
+  const now = new Date("2026-09-24T14:15:00.000Z");
+  const row = baseRow({ digest_hour_local: 0, digest_timezone: "Asia/Tokyo" });
+  const resolveSeeds = vi.fn(async (_owner: string, date: string) => ({ status: "none" as const, schemaInstalled: true, ownerLocalDate: "2026-09-24", timezone: "Asia/Tokyo", snapshot: { version: date === "2026-09-25" ? "pending-v" : "active-v", effectiveLocalDate: date, seeds: [], revocationGeneration: 0 }, revision: 2, revocationGeneration: 0 }));
+  const putSeedBatch = vi.fn(async () => ({ status: "prepared", batchId: "batch" }));
+  const buildPool: PrepareCycleDeps["buildPool"] = async (job) => ({ ok: true, papers: SAMPLE_PAPERS, servedItems: [], seedContext: { kind: "ready", localDate: job.localDate, version: job.localDate === "2026-09-25" ? "pending-v" : "active-v", revocationGeneration: 0, snapshot: null } });
+  const deps = makeDeps({ now: () => now, fetchDueProfiles: vi.fn(async () => [row]), resolveSeeds, putSeedBatch, buildPool, readCurrentIntentVersion: vi.fn(async () => intentVersionFor(row)) });
+  const report = await runDashboardPrepareCycle(deps, now);
+  expect(report.prepare.enqueued).toBe(2);
+  expect(putSeedBatch).toHaveBeenCalledWith(expect.objectContaining({ localDate: "2026-09-25", expectedVersion: "pending-v" }));
+});
