@@ -31,7 +31,7 @@ export function matchSeed(candidateText: string, seed: MatchingSeed): SeedMatch 
     if (!terms.length) continue;
     const matching = terms.filter((term) => candidate.has(term));
     if (!matching.length) continue;
-    const doc = (id: string, title: string): RawItem => ({ id, title, source: "other", authors: [], url: "", publishedAt: "", metadata: {} });
+    const doc = (id: string, title: string): RawItem => ({ id, title, source: "openalex", authors: [], url: "", publishedAt: "", metadata: {} });
     const index = buildIndex([doc("candidate", matching.join(" ")), doc("facet", terms.join(" "))], tokenizeFolded);
     score += weight * scoreTfidf("candidate", terms.join(" "), index, tokenizeFolded);
     for (const phrase of phrases) {
