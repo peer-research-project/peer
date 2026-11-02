@@ -242,7 +242,7 @@ export interface AdvisorSeeds {
 export async function fetchAdvisorSeeds(
   authorId: string,
   projectText: string,
-  opts: { limit?: number; yearsBack?: number; privateRequest?: boolean } = {},
+  opts: { limit?: number; yearsBack?: number } = {},
 ): Promise<AdvisorSeeds> {
   const limit = opts.limit ?? 8;
   const yearsBack = opts.yearsBack ?? 3;
@@ -317,7 +317,7 @@ function relevance(item: RawItem, projTokens: Set<string>): number {
  */
 export async function fetchCitationNeighborhood(
   seedWorkIds: string[],
-  opts: { limit?: number; yearsBack?: number } = {},
+  opts: { limit?: number; yearsBack?: number; privateRequest?: boolean } = {},
 ): Promise<RawItem[]> {
   const ids = seedWorkIds.map(bareId).filter((id) => /^W\d+/.test(id)).slice(0, 8);
   if (ids.length === 0) return [];

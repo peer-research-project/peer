@@ -7,7 +7,7 @@ import { discoverSeedNeighbors } from "./discovery";
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); __resetSemanticScholarClientForTests(); });
 it("keeps private citation requests out of shared fetch cache and provider logs", async () => {
   const error = vi.spyOn(console, "error").mockImplementation(() => {});
-  const fetcher = vi.fn(async () => new Response("private id echoed", { status: 500 })); vi.stubGlobal("fetch", fetcher);
+  const fetcher = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => new Response("private id echoed", { status: 500 })); vi.stubGlobal("fetch", fetcher);
   await expect(fetchCitationNeighborhood(["W123"], { privateRequest: true })).rejects.toThrow();
   expect(fetcher.mock.calls[0][1]).toMatchObject({ cache: "no-store" });
   expect(fetcher.mock.calls[0][1]).not.toHaveProperty("next.revalidate");
@@ -15,7 +15,7 @@ it("keeps private citation requests out of shared fetch cache and provider logs"
 });
 it("keeps private recommendation POSTs out of shared cache and provider logs", async () => {
   const error = vi.spyOn(console, "error").mockImplementation(() => {});
-  const fetcher = vi.fn(async () => new Response("private id echoed", { status: 500 })); vi.stubGlobal("fetch", fetcher);
+  const fetcher = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => new Response("private id echoed", { status: 500 })); vi.stubGlobal("fetch", fetcher);
   await expect(fetchSemanticScholarRecommendations(["a".repeat(40)], { privateRequest: true })).rejects.toThrow();
   expect(fetcher.mock.calls[0][1]).toMatchObject({ cache: "no-store", method: "POST" });
   expect(error).not.toHaveBeenCalled();
