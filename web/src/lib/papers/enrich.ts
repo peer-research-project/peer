@@ -186,6 +186,10 @@ export async function retrieveAbstract(opts: { openalexId?: string; arxivId?: st
             if (text) { attempts.push({ source, status: "found" }); return { status: "found", source: "crossref", abstract: text, tldr, attempts }; }
           } catch { status = "transient"; }
         } else {
+          if (/captcha|cf-chl-|challenge-platform|checking your browser|verify (?:you are|that you are) human/i.test(raw)) {
+            attempts.push({ source, status: "blocked", httpStatus: res.status });
+            continue;
+          }
           const found = publisherAbstract(raw, { doi: validDoi, title: opts.title, url: res.url || undefined });
           if (found && found.text.toLowerCase() !== opts.title?.trim().toLowerCase()) { attempts.push({ source, status: "found" }); return { status: "found", source: found.source, abstract: found.text, tldr, attempts }; }
         }
