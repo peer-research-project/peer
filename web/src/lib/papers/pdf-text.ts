@@ -296,7 +296,7 @@ export async function tryExtractPdfText(url: string): Promise<PdfTextResult> {
     }
     return { ok: true, doc: await withFigureSizes(normalize(outline), download.bytes) };
   } catch (err) {
-    console.warn("[papers/pdf-text] read failed:", err);
+    console.warn("[papers/pdf-text] read failed:", err instanceof Error ? err.name : typeof err);
     return { ok: false, reason: String(err) };
   }
 }
@@ -339,7 +339,7 @@ export async function extractPdfTextFromBytes(bytes: Buffer): Promise<PdfTextRes
   } catch (err) {
     // The file is not a PDF pdf.js can open. Not a scan: say it failed. The
     // error names the problem, never the text.
-    console.warn("[papers/pdf-text] read failed:", err);
+    console.warn("[papers/pdf-text] read failed:", err instanceof Error ? err.name : typeof err);
     return { ok: false, reason: String(err) };
   }
 }
