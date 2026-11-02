@@ -17,6 +17,8 @@ export interface SeedSnapshot {
 /** `unavailable` is a hard failure, never a claim of an empty pool. */
 export type SeedPoolResolution = {
   status: "ready" | "none" | "unavailable";
+  /** False only for a specifically missing seed schema; null on failure. */
+  schemaInstalled: boolean | null;
   ownerLocalDate: string | null;
   timezone: string | null;
   snapshot: SeedSnapshot | null;

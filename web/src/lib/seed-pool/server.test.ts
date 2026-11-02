@@ -7,7 +7,7 @@ beforeEach(() => { mocks.table.mockReset(); mocks.rpc.mockReset(); });
 describe("server seed resolution", () => {
   it.each(["42P01", "PGRST205"])("uses legacy no-seed only when the seed table is absent (%s)", async (code) => {
     mocks.table.mockReturnValue(selectResult({ code }));
-    expect(await resolveSeedPool("owner-a")).toMatchObject({ status: "none", snapshot: null, revision: 0, revocationGeneration: 0 });
+    expect(await resolveSeedPool("owner-a")).toMatchObject({ status: "none", schemaInstalled: false, snapshot: null, revision: 0, revocationGeneration: 0 });
     expect(mocks.rpc).not.toHaveBeenCalled();
   });
   it("does not turn an outage or malformed response into an empty pool", async () => {
@@ -19,7 +19,7 @@ describe("server seed resolution", () => {
   });
   it("passes a future job date to the authoritative owner resolver", async () => {
     mocks.table.mockReturnValue(selectResult(null));
-    mocks.rpc.mockResolvedValue({ data: { status: "ready", ownerLocalDate: "2026-03-07", timezone: "America/Chicago", revision: 2, revocationGeneration: 1, snapshot: { version: "v2", effectiveLocalDate: "2026-03-08", seeds: [], revocationGeneration: 1 } }, error: null });
+    mocks.rpc.mockResolvedValue({ data: { status: "ready", schemaInstalled: true, ownerLocalDate: "2026-03-07", timezone: "America/Chicago", revision: 2, revocationGeneration: 1, snapshot: { version: "v2", effectiveLocalDate: "2026-03-08", seeds: [], revocationGeneration: 1 } }, error: null });
     const now = new Date("2026-03-08T03:00:00Z");
     expect((await resolveSeedPool("owner-a", { targetLocalDate: "2026-03-08", now })).snapshot?.version).toBe("v2");
     expect(mocks.rpc).toHaveBeenCalledWith("seed_pool_resolve", { p_owner_id: "owner-a", p_target_date: "2026-03-08", p_now: now.toISOString() });

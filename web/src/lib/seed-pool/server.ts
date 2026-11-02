@@ -2,16 +2,18 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { SeedPoolRepository, type SeedRpcOutcome } from "./repository";
 import type { ResolveSeedPoolOptions, SeedPoolResolution } from "./types";
 
-const unavailable = (): SeedPoolResolution => ({ status: "unavailable", ownerLocalDate: null, timezone: null, snapshot: null, revision: null, revocationGeneration: 0 });
+const unavailable = (): SeedPoolResolution => ({ status: "unavailable", schemaInstalled: null, ownerLocalDate: null, timezone: null, snapshot: null, revision: null, revocationGeneration: 0 });
 /** Server-only entry point. Owner comes from authenticated server state, never request JSON. */
 export async function resolveSeedPool(ownerId: string, options: ResolveSeedPoolOptions = {}): Promise<SeedPoolResolution> {
   if (!ownerId) return unavailable();
   try {
     const repo = new SeedPoolRepository(createAdminClient());
     const installed = await repo.installed();
-    if (installed === "missing") return { status: "none", ownerLocalDate: null, timezone: null, snapshot: null, revision: 0, revocationGeneration: 0 };
+    if (installed === "missing") return { status: "none", schemaInstalled: false, ownerLocalDate: null, timezone: null, snapshot: null, revision: 0, revocationGeneration: 0 };
     if (installed !== "yes") return unavailable();
-    return await repo.resolve(ownerId, options.targetLocalDate, options.now) ?? unavailable();
+    const resolved = await repo.resolve(ownerId, options.targetLocalDate, options.now);
+    if (!resolved || resolved.status === "unavailable" || !resolved.ownerLocalDate || !resolved.timezone) return unavailable();
+    return { ...resolved, schemaInstalled: true };
   } catch { return unavailable(); }
 }
 export interface SeedBatchFence { ownerId: string; localDate: string; expectedVersion: string; expectedRevocationGeneration: number }
