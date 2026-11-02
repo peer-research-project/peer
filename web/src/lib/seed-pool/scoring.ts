@@ -1,3 +1,5 @@
+import { buildIndex, scoreTfidf } from "@/lib/scoring/tfidf";
+import type { RawItem } from "@/lib/sources/types";
 import { tokenizeFolded } from "@/lib/scoring/tokenize";
 
 /** This shape describes only extracted matching facets, never PDF text. */
@@ -14,24 +16,32 @@ export const hasUsableSeed = (seed: MatchingSeed): boolean => Boolean(seed.canon
   && Object.values(seed.features).some((phrases: readonly string[]) => phrases.some((phrase: string) => tokenizeFolded(phrase).length > 0));
 const clamp = (n: number) => Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : 0;
 
-/** Match only extracted phrases actually present in the public candidate text. */
+/** Compare each facet independently using local folded-token TF-IDF. The
+ * candidate vector contains only supported facet words: unrelated title or
+ * abstract length cannot dilute a clear match. A reason/admission requires
+ * every meaningful word of at least one actual facet phrase to be present. */
 export function matchSeed(candidateText: string, seed: MatchingSeed): SeedMatch {
   const tokens = tokenizeFolded(candidateText);
+  const candidate = new Set(tokens);
   const hits: FacetHit[] = [];
   let score = 0;
   for (const { name, weight } of FACETS) {
     const phrases = [...new Set(seed.features[name].map((v) => v.trim()).filter(Boolean))];
-    if (!phrases.length) continue;
-    let matched = 0;
+    const terms = [...new Set(phrases.flatMap(tokenizeFolded))];
+    if (!terms.length) continue;
+    const matching = terms.filter((term) => candidate.has(term));
+    if (!matching.length) continue;
+    const doc = (id: string, title: string): RawItem => ({ id, title, source: "other", authors: [], url: "", publishedAt: "", metadata: {} });
+    const index = buildIndex([doc("candidate", matching.join(" ")), doc("facet", terms.join(" "))], tokenizeFolded);
+    score += weight * scoreTfidf("candidate", terms.join(" "), index, tokenizeFolded);
     for (const phrase of phrases) {
       const parts = tokenizeFolded(phrase);
-      if (!parts.length) continue;
-      const present = tokens.some((_, i) => parts.every((part, j) => tokens[i + j] === part));
-      if (present) { matched++; hits.push({ facet: name, phrase }); }
+      if (!parts.length || !parts.every((part) => candidate.has(part))) continue;
+      const contiguous = tokens.some((_, i) => parts.every((part, j) => tokens[i + j] === part));
+      hits.push({ facet: name, phrase: contiguous ? phrase : parts.join(" / ") });
     }
-    score += weight * matched / phrases.length;
   }
-  return { seedId: seed.id, canonicalKey: seed.canonicalKey, score: clamp(score), hits };
+  return { seedId: seed.id, canonicalKey: seed.canonicalKey, score: hits.length ? clamp(score) : 0, hits };
 }
 
 /** Group exact-byte or canonical duplicates, including transitive aliases. */
@@ -71,11 +81,15 @@ export function diversifySeedRanking<T extends { title: string; abstract?: strin
   const remaining = [...items];
   const out: T[] = [];
   let previous: string | undefined;
-  while (remaining.length) {
-    const strongest = (item: T) => {
+  const cache = new Map<T, string | undefined>();
+  const strongest = (item: T) => {
+      if (cache.has(item)) return cache.get(item);
       const match = strongestSeedMatches([item.title, item.abstract ?? "", ...(item.tags ?? [])].join(" "), seeds)[0];
-      return admitsBySeed(match) ? match?.canonicalKey : undefined;
+      const key = admitsBySeed(match) ? match?.canonicalKey : undefined;
+      cache.set(item, key);
+      return key;
     };
+  while (remaining.length) {
     let at = 0;
     if (previous && strongest(remaining[0]) === previous) {
       const alternate = remaining.findIndex((item, i) => i > 0 && remaining[0].score - item.score <= 0.03 && !!strongest(item) && strongest(item) !== previous);

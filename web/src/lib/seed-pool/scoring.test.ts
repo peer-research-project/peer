@@ -43,3 +43,14 @@ describe("seed matching", () => {
     expect(mixSeedScore(5, -1, null, NaN)).toBeCloseTo(0.4);
   });
 });
+
+
+it("matches folded facet terms regardless of order using TF-IDF and grounds the reason", () => {
+  const reordered = matchSeed("Electrolytes with solid interfaces", battery);
+  expect(reordered.score).toBeGreaterThan(0.3);
+  expect(reordered.hits).toContainEqual({ facet: "topic", phrase: "solid / electrolyte" });
+  expect(admitsBySeed(reordered)).toBe(true);
+  expect(admitsBySeed(matchSeed("galactic neutron diffraction", battery))).toBe(false);
+  expect(matchSeed("galactic observation", battery).score).toBe(0);
+  expect(matchSeed("solid lithium neutron astronomy", battery).score).toBe(0);
+});
