@@ -115,6 +115,8 @@ export interface DashboardBatch {
   readonly papers: readonly PaperIdentity[];
   readonly status: DashboardBatchStatus;
   readonly intentVersion?: string;
+  readonly seedPoolVersion?: string;
+  readonly seedRevocationGeneration?: number;
   readonly createdAt: string;
   readonly servedAt?: string;
   readonly acknowledgedAt?: string;
@@ -398,6 +400,8 @@ interface DashboardBatchRow {
   acknowledged_at: string | null;
   /** P4-S3 addition -- absent/null on a row written before this column existed. */
   served_items?: unknown[] | null;
+  seed_pool_version?: string | null;
+  seed_revocation_generation?: number | null;
 }
 
 interface DeliveryRow {
@@ -488,6 +492,8 @@ function rowToBatch(row: DashboardBatchRow): DashboardBatch {
     servedAt: row.served_at ?? undefined,
     acknowledgedAt: row.acknowledged_at ?? undefined,
     servedItems: row.served_items ?? undefined,
+    ...(row.seed_pool_version != null ? { seedPoolVersion: row.seed_pool_version } : {}),
+    ...(row.seed_revocation_generation != null ? { seedRevocationGeneration: row.seed_revocation_generation } : {}),
   };
 }
 

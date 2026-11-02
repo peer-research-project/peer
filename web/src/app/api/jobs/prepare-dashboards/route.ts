@@ -24,6 +24,8 @@
 import { randomUUID } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { resolveSeedPool, putSeedPreparedBatch } from "@/lib/seed-pool/server";
+import type { PrepareWorkerDeps } from "@/lib/dashboard/prepare-worker";
 import {
   bumpReason,
   conflictSkipReasonCode,
@@ -105,6 +107,8 @@ export interface PrepareCycleDeps {
   /** Structurally narrowed exactly like prepare-worker.ts's own `PrepareWorkerDeps.ledger` -- this route cannot call markServed/acknowledgeBatch even by mistake (test 4 in the guide's §3 depends on this). */
   ledger: Pick<DashboardDeliveryLedger, "getBatch" | "prepareBatch">;
   buildPool: (job: DashboardPrepareJob) => Promise<PrepareBuildOutcome>;
+  resolveSeeds?: PrepareWorkerDeps["resolveSeeds"];
+  putSeedBatch?: PrepareWorkerDeps["putSeedBatch"];
   leaseOwner: string;
   leaseDurationMs: number;
   maxJobsPerRun: number;
@@ -292,6 +296,8 @@ async function runDrainPhase(
         ledger: deps.ledger,
         buildPool: deps.buildPool,
         readCurrentIntentVersion: deps.readCurrentIntentVersion,
+        resolveSeeds: deps.resolveSeeds,
+        putSeedBatch: deps.putSeedBatch,
         leaseOwner: deps.leaseOwner,
       },
       { leaseDurationMs: deps.leaseDurationMs, maxJobs: 1 },
@@ -473,6 +479,8 @@ export async function GET(req: NextRequest) {
       jobs: new SupabaseDashboardPrepareJobRepository(),
       ledger: new SupabaseDashboardDeliveryLedger(),
       buildPool: createPrepareAheadBuildPool({ admin, now: () => now }),
+      resolveSeeds: (ownerId, localDate, at) => resolveSeedPool(ownerId, { targetLocalDate: localDate, now: at }),
+      putSeedBatch: putSeedPreparedBatch,
       leaseOwner,
       leaseDurationMs: PREPARE_LEASE_DURATION_MS,
       maxJobsPerRun: PREPARE_DRAIN_MAX_JOBS_PER_RUN,

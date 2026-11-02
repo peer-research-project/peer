@@ -360,3 +360,28 @@ describe("drainPrepareQueue", () => {
     expect(outcomes).toEqual([]);
   });
 });
+
+
+it("rebuilds a stale prepared batch for the job date and atomically fences the new snapshot", async () => {
+  const { repo, job } = await claimedJob();
+  const seedContext = { kind: "ready" as const, localDate: job.localDate, version: "new-v", revocationGeneration: 2, snapshot: null };
+  const ledger = makeSpyLedger({ getBatch: vi.fn(async () => ({ id: "old", ownerId: job.ownerId, localDate: job.localDate, papers: [], status: "prepared" as const, createdAt: new Date().toISOString(), seedPoolVersion: "old-v", seedRevocationGeneration: 2 })) });
+  const resolveSeeds = vi.fn(async () => ({ status: "none" as const, schemaInstalled: true, ownerLocalDate: job.localDate, timezone: "America/Chicago", snapshot: { version: "new-v", effectiveLocalDate: job.localDate, seeds: [], revocationGeneration: 2 }, revision: 2, revocationGeneration: 2 }));
+  const putSeedBatch = vi.fn(async () => ({ status: "prepared", batchId: "new" }));
+  const buildPool = vi.fn(async () => ({ ok: true as const, papers: SAMPLE_PAPERS, servedItems: [], seedContext }));
+  const outcome = await runPrepareJob(job, makeDeps({ jobs: repo, ledger, buildPool, resolveSeeds, putSeedBatch }));
+  expect(outcome).toEqual({ kind: "prepared", batchId: "new" });
+  expect(resolveSeeds).toHaveBeenCalledWith(job.ownerId, job.localDate, expect.any(Date));
+  expect(putSeedBatch).toHaveBeenCalledWith(expect.objectContaining({ expectedVersion: "new-v", expectedRevocationGeneration: 2, localDate: job.localDate }));
+  expect(ledger.prepareBatch).not.toHaveBeenCalled();
+});
+
+it("never writes a built pool when its seed version changed during build", async () => {
+  const { repo, job } = await claimedJob();
+  const resolveSeeds = vi.fn(async () => ({ status: "none" as const, schemaInstalled: true, ownerLocalDate: job.localDate, timezone: "America/Chicago", snapshot: null, revision: 1, revocationGeneration: 1 }));
+  const putSeedBatch = vi.fn();
+  const buildPool = vi.fn(async () => ({ ok: true as const, papers: SAMPLE_PAPERS, seedContext: { kind: "ready" as const, localDate: job.localDate, version: "old", revocationGeneration: 0, snapshot: null } }));
+  const outcome = await runPrepareJob(job, makeDeps({ jobs: repo, resolveSeeds, putSeedBatch, buildPool }));
+  expect(outcome.kind).toBe("failed");
+  expect(putSeedBatch).not.toHaveBeenCalled();
+});
