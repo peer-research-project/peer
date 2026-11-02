@@ -42,6 +42,29 @@ Each unit is1. PASS count is number fully satisfied. Defect cost: unusable1.0; m
 
 ## Scores
 
-| Round | Commit | A fixture | A real items | B rendered | B hosted workflow | Consecutive at target | Readers / evidence |
-|---|---|---|---|---|---|---|---|
-| 0 investigation |87f92259|not scored|defects reproduced|entries hidden live|unrun|0|investigation only|
+## Theme C: Seed Paper Pool (18 units, authorized2026-11-02 UTC)
+
+1. Optional onboarding accepts1-5PDFs, recommends3-5, max5 enforced.
+2. Profile clearly shows active/pending seeds, parse status, effective owner-local date, add/remove/replace/undo.
+3. Actual PDF text/terms/object/method features work without paidmodels; parsefail cannotcreatebogusseed.
+4. Separate nearest1-2seed representation preserves distinctinterests.
+5. Canonical duplicate/crosssource copies cannotmultiply boost.
+6. Retrieval/output diversity represents multiple seed interests.
+7. Initial40/35/15/10 normalizedhypothesis appliedinspectably; hard exclusions override.
+8. Missing feedback weight reallocates to declaredintent; nozero penalty.
+9. No-seed user follows existingranking path gracefully.
+10. Firsteverpool affects firstbriefing immediately.
+11. Lateredits activate nextOWNERLOCALCALENDARDATE (including DST/timezone cases), currentday frozen.
+12. Multipleedits retainlatestpending, undo restorespriorpending/active semantics.
+13. Web/email/preparedjobs/cache use sameactivepoolversion.
+14. Seedpurpose neverrecordsordinaryuploadpreference/doublecount; removedseedstrongsignal absent.
+15. Active seedPDF/features persist beyondordinary30dayexpiry.
+16. Reversible removal is notnegativefeedback; explicitownerforget immediatelyremovesasset/features underclearsemantics.
+17. Authentication/privateownership enforced throughout upload/read/edit/delete/jobs/cache.
+18. Explanations name actualsupportedmatch; UI/content claims truthful andportable.
+
+## Scores (all three themes must meet target)
+
+| Round | Commit | A fixture | A real items | B rendered | B hosted workflow | C seed | Consecutive at target | Readers / evidence |
+|---|---|---|---|---|---|---|---|---|
+| 0 investigation |87f92259|not scored|defects reproduced|entries hidden live|unrun|not scoped then|0|investigation only|
