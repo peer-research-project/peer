@@ -135,7 +135,7 @@ import { explanationFor, passageHash, useExplainThreadsStore, type ExplainTurn }
 import { paragraphKey, usePlainRewritesStore } from "@/store/plain-rewrites";
 import { PLAIN_DEFAULT_LEVEL, PLAIN_REWRITE_ENABLED, isPlainLevel, type PlainLevel } from "@/lib/papers/plain-levels";
 import { exampleQuestions } from "@/lib/reader/question-examples";
-import { deepReportRequested, useModelReport } from "@/components/reader/use-model-report";
+import { deepReportRequested, reportForReading, useModelReport } from "@/components/reader/use-model-report";
 import { usePrivateSupplement } from "@/components/reader/use-private-supplement";
 import { PrivatePdfStatus } from "@/components/reader/private-pdf-status";
 import { UploadButton } from "@/components/briefing/upload-button";
@@ -744,7 +744,7 @@ function Reader({
   // holds — here, in the browser, from the `items` the page last read (P7-13:
   // up to 250 ms behind the typing).
   const tier0Route = useMemo(() => readingRoute(reading, asked), [reading, asked]);
-  const report = model.report;
+  const report = reportForReading(model.report, reading);
   // P2-04: all route consumers receive this one display route. Tier 0 still
   // stands unchanged if there is no verified report/question overlay. P2-04b:
   // the map and the body both take it as a `DrawRoute`

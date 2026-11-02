@@ -269,6 +269,12 @@ export function deepReportRequested(
   return Boolean(profile.deepReportEnabled || paper?.fullTextUploadId) && aiMode !== "none";
 }
 
+/** A report based on an abstract cannot be displayed without that abstract. */
+export function reportForReading(report: PaperReport | null, reading: { provenance: { abstract: string } } | null): PaperReport | null {
+  if (report && (report.provenance?.basis === "model-abstract" || (!report.provenance?.basis && report.depth !== "deep")) && (!reading || reading.provenance.abstract === "none")) return null;
+  return report;
+}
+
 export interface ModelReportState {
   /** A verified, model-written report; null when there is no model layer. */
   report: PaperReport | null;
