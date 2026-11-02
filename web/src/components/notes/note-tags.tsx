@@ -21,6 +21,7 @@ import type { Route } from "next";
 import { useCallback, useEffect, useRef, useSyncExternalStore, type ReactNode } from "react";
 import { create } from "zustand";
 import type { PaperReading } from "@/lib/papers/reading";
+import { observedReadingKey, READING_IDENTITY_EVENT } from "@/lib/papers/reading-identity";
 import { ANSWERS_BLOCK_ID, SUMMARY_ID_PREFIX, isPageBlockId, type AnchorSection } from "@/lib/notes/anchor-blocks";
 import { stickyTitle } from "@/lib/notes/blocks";
 import type { HighlightColourId, NoteAnchor } from "@/lib/notes/types";
@@ -349,7 +350,7 @@ function cachedReadings(raw: string | null) {
 }
 
 /**
- * The body of the newest reading kept in this browser for a paper (null when there is none, it is unreadable, its body is
+ * The body of the last observed reading identity for a paper (null when there is none, it is unreadable, its body is
  * not sections of paragraph strings, or it is not one the reading page would use: another version, or older than a day —
  * then it is not known, and a note is never called lost by it). The notes page has no paper on show, so it asks what the
  * reader last had.
@@ -358,9 +359,11 @@ export function storedBodyOf(paperId: string, storage?: Pick<Storage, "getItem">
   try {
     const store = storage ?? (typeof window === "undefined" ? undefined : window.localStorage);
     if (!store) return null;
+    const currentKey = observedReadingKey(paperId, store);
+    if (!currentKey) return null;
     let best: { ts: number; body: Body } | null = null;
     for (const [key, entry] of Object.entries(cachedReadings(store.getItem(READING_CACHE_KEY)))) {
-      if (!key.startsWith(`${paperId}|`)) continue;
+      if (key !== currentKey) continue;
       if (entry?.reading?.version !== READING_VERSION) continue;
       const keyFingerprint = key.match(/\|source:([a-z0-9]+)$/)?.[1] ?? "";
       if (entry.reading.sourceFingerprint !== keyFingerprint) continue;
@@ -431,7 +434,8 @@ export function HeadingWithLostLine({ lost, children }: { lost: boolean; childre
 
 const subscribeToStorage = (onChange: () => void) => {
   window.addEventListener("storage", onChange);
-  return () => window.removeEventListener("storage", onChange);
+  window.addEventListener(READING_IDENTITY_EVENT, onChange);
+  return () => { window.removeEventListener("storage", onChange); window.removeEventListener(READING_IDENTITY_EVENT, onChange); };
 };
 
 /** Whether a note's passage is lost, and the id of the sticky heading that carries its anchor (the store tells the ids apart by the anchor). */

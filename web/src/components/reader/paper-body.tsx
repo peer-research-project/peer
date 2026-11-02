@@ -1250,10 +1250,11 @@ export function PaperBody({
   // search), and one the paper no longer holds is drawn nowhere and told to its sticky.
   const resolved = useMemo(() => (noteAnchors ? resolveAnchors(body, noteAnchors) : null), [body, noteAnchors]);
   useEffect(() => {
-    if (!resolved) return;
+    if (!resolved || body.length === 0) return;
     if (resolved.fixes.length > 0) repairAnchors(resolved.fixes);
     useLostPassages.getState().setLost(resolved.lost);
-  }, [resolved]);
+    return () => useLostPassages.getState().setLost([]);
+  }, [resolved, body.length]);
   // P11-27 (rule 2): the notes store reads the words of a heading or a caption from the body on show (the hooks that take a note or a highlight know only the
   // paragraphs). Memory only; taken back when the body goes.
   useEffect(() => {

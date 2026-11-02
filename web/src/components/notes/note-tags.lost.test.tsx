@@ -49,11 +49,11 @@ describe("storedBodyOf — the body of the paper's reading kept in this browser"
   // re-aimed (§1c): an entry now carries the version and a recent time, which the gates below need (same cases as before)
   const NOW = 1_800_000_000_000;
   const entry = (ts: number, paragraphs: string[], version = 19) => ({ ts: NOW - 1000 * ts, reading: { version, sourceFingerprint: "", body: [{ paragraphs }] } });
-  const store = (value: unknown) => ({ getItem: () => (typeof value === "string" ? value : JSON.stringify(value)) });
+  const store = (value: unknown, current = "p1|public|") => ({ getItem: (key: string) => key.startsWith("peer-reading-current-v1:") ? current : (typeof value === "string" ? value : JSON.stringify(value)) });
 
-  it("is the newest reading kept under the paper's id, and no other paper's", () => {
+  it("uses the current reading identity and no other paper's", () => {
     const cache = { "p1|public|": entry(20, ["old"]), "p1|up|3": entry(10, ["new"]), "p2|public|": entry(5, ["other"]) };
-    expect(storedBodyOf("p1", store(cache), NOW)).toEqual([{ paragraphs: ["new"] }]);
+    expect(storedBodyOf("p1", store(cache, "p1|up|3"), NOW)).toEqual([{ paragraphs: ["new"] }]);
     expect(storedBodyOf("p3", store(cache), NOW)).toBeNull();
   });
 
@@ -71,7 +71,7 @@ describe("storedBodyOf — the body of the paper's reading kept in this browser"
     expect(storedBodyOf("p1", store(stale), NOW)).toBeNull();
     expect(passageIsLost(ANCHOR, "h2", {}, storedBodyOf("p1", store(stale), NOW))).toBe(false);
     // and the newer entry wins over an older-version one, not the other way round
-    expect(storedBodyOf("p1", store({ ...stale, "p1|up|3": entry(50, ["kept"]) }), NOW)).toEqual([{ paragraphs: ["kept"] }]);
+    expect(storedBodyOf("p1", store({ ...stale, "p1|up|3": entry(50, ["kept"]) }, "p1|up|3"), NOW)).toEqual([{ paragraphs: ["kept"] }]);
   });
 
   it("does not know a reading older than a day (the page would fetch it again), and uses one just inside the day", () => {
@@ -135,12 +135,26 @@ describe("AnchorLink — the wiring", () => {
 
 
 it("ignores a body cached under a different source fingerprint", () => {
-  const storage = { getItem: (key: string) => key === "peer-reading-v4" ? JSON.stringify({ "p1|public||source:new": { ts: Date.now(), reading: { version: 19, sourceFingerprint: "old", body: [{ paragraphs: ["stale"] }] } } }) : null };
+  const storage = { getItem: (key: string) => key.startsWith("peer-reading-current-v1:") ? "p1|public||source:new" : key === "peer-reading-v4" ? JSON.stringify({ "p1|public||source:new": { ts: Date.now(), reading: { version: 19, sourceFingerprint: "old", body: [{ paragraphs: ["stale"] }] } } }) : null };
   expect(storedBodyOf("p1", storage)).toBeNull();
 });
 
 
 it("reads the current fingerprinted cache for note passages", () => {
-  const storage = { getItem: (key: string) => key === "peer-reading-v4" ? JSON.stringify({ "p1|public||source:abc": { ts: Date.now(), reading: { version: 19, sourceFingerprint: "abc", body: [{ paragraphs: ["current"] }] } } }) : null };
+  const storage = { getItem: (key: string) => key.startsWith("peer-reading-current-v1:") ? "p1|public||source:abc" : key === "peer-reading-v4" ? JSON.stringify({ "p1|public||source:abc": { ts: Date.now(), reading: { version: 19, sourceFingerprint: "abc", body: [{ paragraphs: ["current"] }] } } }) : null };
   expect(storedBodyOf("p1", storage)).toEqual([{ paragraphs: ["current"] }]);
+});
+
+
+it.each(["p1|public||source:new", "p1|upload:abcd|2"])("does not mark a note lost from an old cached reading when %s is current", (current) => {
+  const old = { "p1|public||source:old": { ts: Date.now(), reading: { version: 19, sourceFingerprint: "old", body: [{ paragraphs: ["different old text"] }] } } };
+  const storage = { getItem: (key: string) => key.startsWith("peer-reading-current-v1:") ? current : JSON.stringify(old) };
+  const body = storedBodyOf("p1", storage);
+  expect(body).toBeNull();
+  expect(passageIsLost(ANCHOR, "h2", {}, body)).toBe(false);
+});
+
+it("treats a missing current identity as unknown", () => {
+  const storage = { getItem: (key: string) => key.startsWith("peer-reading-current-v1:") ? null : JSON.stringify({ "p1|public|": { ts: Date.now(), reading: { version: 19, sourceFingerprint: "", body: [] } } }) };
+  expect(storedBodyOf("p1", storage)).toBeNull();
 });

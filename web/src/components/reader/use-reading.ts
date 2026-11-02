@@ -14,6 +14,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { Paper } from "@/types";
 import { buildReading, type PaperReading } from "@/lib/papers/reading";
 import { fingerprintReadingSource } from "@/lib/papers/reading-source";
+import { recordReadingKey } from "@/lib/papers/reading-identity";
 export { fingerprintReadingSource } from "@/lib/papers/reading-source";
 
 const STORAGE_KEY = "peer-reading-v4";
@@ -118,6 +119,11 @@ export function useReading(paper: Paper | undefined): {
   const privatePdf = !!uploadId || !!paperId?.startsWith("upload:");
   const sourceFingerprint = paper ? fingerprintReadingSource(paper) : "";
   const readingKey = buildReadingKey(paperId, uploadId, paper?.revision, sourceFingerprint);
+
+  useEffect(() => {
+    if (!paperId) return;
+    try { recordReadingKey(paperId, readingKey, localStorage); } catch { /* storage unavailable */ }
+  }, [paperId, readingKey]);
 
   // Synchronous and complete: the page the reader sees before any request.
   const reading0 = useMemo(() => (paper ? buildReading(paper, null) : null), [paper]);

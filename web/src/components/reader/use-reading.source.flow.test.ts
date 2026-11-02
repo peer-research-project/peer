@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
 import { hookRuntime } from "@/test-support/hook-runtime";
 import { buildReading } from "@/lib/papers/reading";
 import type { Paper } from "@/types";
+import { readingIdentityStorageKey } from "@/lib/papers/reading-identity";
 import { buildReadingKey, fingerprintReadingSource, useReading } from "./use-reading";
 const paper = { id: "openalex:W1", title: "Invented", authors: [], relevanceReason: "", venue: "", source: "other", summaryIntro: "The sample is blue.", summaryExperimentKeywords: [], summaryResultDiscussion: "", isSaved: false } as Paper;
 afterEach(() => vi.unstubAllGlobals());
@@ -22,6 +23,7 @@ it("rejects a stale server reading and never caches it under the new source", as
   expect(mounted.value.fromServer).toBe(false);
   expect(mounted.value.reading?.abstract.sentences.join(" ")).toContain("sample is blue");
   expect(entries.has("peer-reading-v4")).toBe(false);
+  expect(entries.get(readingIdentityStorageKey(paper.id))).toBe(buildReadingKey(paper.id, undefined, undefined, fingerprintReadingSource(paper)));
   mounted.unmount();
 });
 
