@@ -11,7 +11,7 @@ import type { Route } from "next";
 import { usePathname } from "next/navigation";
 import { Avatar } from "@/components/account/account-section";
 import { useAuthUser, userAvatar } from "@/components/account/use-auth-user";
-import { WriteButton } from "@/components/shell/write-button";
+import { UploadButton } from "@/components/briefing/upload-button";
 import { HelpGlyph, RouteGlyph } from "@/components/shell/icons";
 import {
   SHELL_LINKS,
@@ -100,7 +100,8 @@ export function Masthead() {
           aria-label="Peer"
           className="peer-nav relative justify-self-end inline-flex items-center text-text-muted"
         >
-          <WriteButton />
+          <UploadButton />
+          <Link href="/saved#shelf-notes" className="peer-nav-link inline-flex items-center px-3">notes</Link>
           {SHELL_LINKS.map((link) => {
             const active = isActiveLink(link, route);
             const isProfile = link.route === "profile";
@@ -144,6 +145,11 @@ export function Masthead() {
           </button>
         </nav>
       </header>
+
+      <div className="md:hidden flex items-center gap-2 px-4 py-2">
+        <UploadButton />
+        <Link href="/saved#shelf-notes" className="inline-flex min-h-11 items-center px-3 text-text-muted">notes</Link>
+      </div>
 
       {/* Phone, briefing only: the nameplate, in flow, above the page's own
           dateline. The reading page has no top chrome — the plate is the

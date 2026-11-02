@@ -433,23 +433,16 @@ describe("UploadRetryEmpty (§1bi.8b)", () => {
   });
 });
 
-// UPLOAD-404 (§1bi.2): the home page and this page both gate their
-// `<UploadButton />` on the availability check — proved at the predicate
-// level in use-uploads-available.test.ts. This is the wiring-stays-wired
-// guard for THIS file's own call site, the same technique page.test.tsx
-// already uses for its "ReadingStrip call site keeps its width classes"
-// check, since this repo has no harness to render the whole effectful page.
-describe("page.tsx source — uploadAction call site stays gated on uploadsAvailable (§1bi.2)", () => {
-  // Re-aimed (P11-20 follow-up, ruling §1h.120, §1c): the element is made once (`const uploadAction = …`), gated on `uploadsAvailable` where it is made, and
-  // handed to the two places that draw it (the commands in one column, the details in the panes); so the gate is checked at the one place it stands, and
-  // both call sites are checked to hand over that element and not their own ungated one.
-  it("passes uploadsAvailable at the uploadAction call site", async () => {
+// The paper-specific upload remains visible regardless of availability.
+describe("page.tsx source — uploadAction stays visible", () => {
+  it("passes the same ungated upload action to both layouts", async () => {
     const { readFileSync } = await import("node:fs");
     const source = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
     const start = source.indexOf("const uploadAction =");
     expect(start).toBeGreaterThan(-1);
     const madeAt = source.slice(start, source.indexOf("\n", start));
-    expect(madeAt).toContain("uploadsAvailable");
+    expect(madeAt).toContain("<UploadButton targetPaper={paper}");
+    expect(madeAt).not.toContain("uploadsAvailable");
     expect(source.match(/uploadAction=\{uploadAction\}/g)).toHaveLength(2);
     expect(source.match(/uploadAction=\{/g)).toHaveLength(2);
   });

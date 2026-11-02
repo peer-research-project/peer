@@ -140,7 +140,6 @@ import { usePrivateSupplement } from "@/components/reader/use-private-supplement
 import { PrivatePdfStatus } from "@/components/reader/private-pdf-status";
 import { UploadButton } from "@/components/briefing/upload-button";
 import { useAuthUser } from "@/components/account/use-auth-user";
-import { useUploadsAvailable, uploadsReady } from "@/lib/papers/use-uploads-available";
 import {
   BODY,
   NOT_FOUND,
@@ -684,7 +683,6 @@ function Reader({
   // existing saved upload's own view/delete actions (those never call
   // `hostedUploadsEnabled()`). Skipped entirely on an upload's own page,
   // where that entry point never renders anyway (see `uploadAction` below).
-  const uploadsAvailable = uploadsReady(useUploadsAvailable(!originalPaper.id.startsWith("upload:")));
   const profile = useProfileStore((s) => s.profile);
   const feedPapers = useFeedStore((s) => s.papers);
   const markRead = useFeedStore((s) => s.markRead);
@@ -1409,7 +1407,7 @@ function Reader({
 
   // P11-20 follow-up (ruling §1h.120): one element, two places — the commands' last row in one column, the details' head in the three panes
   // (`decision-block.tsx` draws it where the window says).
-  const uploadAction = !paper.id.startsWith("upload:") && uploadsAvailable ? <UploadButton targetPaper={paper} onUploaded={setUpload} /> : undefined;
+  const uploadAction = !paper.id.startsWith("upload:") ? <UploadButton targetPaper={paper} onUploaded={setUpload} /> : undefined;
 
   return (
     // `tabIndex={-1}`: Next's layout router focuses the segment's first

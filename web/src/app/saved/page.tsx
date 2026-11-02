@@ -24,6 +24,7 @@ import { newestFirst, notesCiting, readingNoteFor, useNotesHydrated, useNotesSto
 import { citableFromPaper } from "@/lib/notes/cite";
 import { blankNote, outlineDraft, readingNote, relatedWorkDraft } from "@/lib/notes/templates";
 import { PaperCard } from "@/components/cards/paper-card";
+import { noteSearchText } from "@/components/notes/note-preview";
 import { NoteCard } from "@/components/notes/note-card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageContainer } from "@/components/ui/page-container";
@@ -33,6 +34,11 @@ import { COMMAND } from "@/components/ui/command";
 import { cn } from "@/lib/cn";
 
 export type DraftKind = "related" | "outline";
+
+export function filterNotes(notes: Note[], query: string): Note[] {
+  const q = query.trim().toLowerCase();
+  return notes.filter((note) => noteSearchText(note).includes(q));
+}
 
 export function SavedPageView({
   savedPapers,
@@ -51,9 +57,11 @@ export function SavedPageView({
   onDraft?: (papers: Paper[], kind: DraftKind) => void;
   onTakeNotes?: (paper: Paper) => void;
 }) {
+  const [query, setQuery] = useState("");
   const [selecting, setSelecting] = useState(false);
   const [picked, setPicked] = useState<string[]>([]);
   const list = newestFirst(notes);
+  const shownNotes = filterNotes(list, query);
   const pickedPapers = savedPapers.filter((p) => picked.includes(p.id));
   const toggle = (id: string) => setPicked((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]));
   const stop = () => {
@@ -88,7 +96,7 @@ export function SavedPageView({
           </header>
         }
       >
-      <div id="shelf-notes" className="scroll-mt-20">
+      <div id="shelf-notes" tabIndex={-1} className="scroll-mt-20">
       <Band label="Notes" gap="none">
         <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2">
           <button type="button" className={COMMAND} onClick={onNewNote}>
@@ -101,8 +109,15 @@ export function SavedPageView({
           )}
         </div>
         {list.length > 0 && (
+          <label className="mt-4 block text-body-sm text-text-muted">
+            Search notes
+            <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} className="ml-2 border border-border bg-surface px-2 py-1 text-text" />
+          </label>
+        )}
+        {list.length > 0 && shownNotes.length === 0 && <p className="mt-4 text-text-muted">No matching notes.</p>}
+        {shownNotes.length > 0 && (
           <div className="mt-5 grid grid-cols-1 gap-5 sm:grid-cols-2 2xl:grid-cols-3">
-            {list.map((note) => (
+            {shownNotes.map((note) => (
               <NoteCard key={note.id} note={note} />
             ))}
           </div>

@@ -17,7 +17,7 @@ vi.mock("@/store/feed", () => ({
   ) => (selector ? selector(storeState) : storeState),
 }));
 
-import { SavedPageView } from "./page";
+import { filterNotes, SavedPageView } from "./page";
 import { citableFromPaper } from "@/lib/notes/cite";
 import { readingNote, relatedWorkDraft } from "@/lib/notes/templates";
 
@@ -94,4 +94,12 @@ describe("SavedPageView", () => {
     expect(html).not.toContain("Reading notes and drafts land here");
     expect(html).toContain("+ New note");
   });
+});
+
+
+it("searches all notes using their text and marked passages", () => {
+  const one = { ...relatedWorkDraft([]), title: "Unusual shoreline" };
+  const two = { ...relatedWorkDraft([]), title: "Battery" };
+  expect(filterNotes([one, two], " SHORELINE ")).toEqual([one]);
+  expect(filterNotes([one, two], "")).toEqual([one, two]);
 });

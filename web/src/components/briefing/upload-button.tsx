@@ -1,16 +1,5 @@
 "use client";
 
-// The upload button — S7: bring your own PDF, immediately left of the search
-// box (see app/page.tsx, the same flex row as SearchBox). A black square the
-// height of the search box, a white upload glyph, no icon library (this repo
-// hand-writes every icon it uses). Click opens the native file picker;
-// dropping a PDF onto the square works the same way.
-//
-// The square's colors are fixed regardless of light/dark mode
-// (--color-fixed-black/--color-fixed-white in globals.css) — this one control
-// is deliberately not theme-adaptive, per the literal spec ("a black square
-// with an upload icon in white").
-
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Paper } from "@/types";
@@ -21,6 +10,7 @@ import { UPLOAD_RIGHTS_VERSION } from "@/lib/papers/upload-policy";
 import { useProfileStore } from "@/store/profile";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
+import { useUploadsAvailable, type UploadsAvailability } from "@/lib/papers/use-uploads-available";
 import { supabase } from "@/lib/supabase/client";
 
 interface UploadResponse {
@@ -134,10 +124,23 @@ function UploadGlyph({ size }: { size: number }) {
   );
 }
 
+export function UploadAvailabilityMessage({ state, onRetry }: { state: UploadsAvailability; onRetry: () => void }) {
+  if (state === "available") return null;
+  return (
+    <div role="status" className="absolute left-0 top-full z-50 mt-1 w-64 rounded-md border border-border bg-surface p-3 text-body-sm text-text shadow-card">
+      <p>{state === "unknown" ? "Checking whether PDF upload is available…" : "PDF upload is unavailable. Check your connection or try again later."}</p>
+      <button type="button" className="mt-2 underline" onClick={onRetry}>Retry</button>
+    </div>
+  );
+}
+
 export function UploadButton({ className = "", targetPaper, onUploaded }: {
   className?: string; targetPaper?: Paper; onUploaded?: (paper: Paper) => void;
 }) {
   const router = useRouter();
+  const [attempt, setAttempt] = useState(0);
+  const availability = useUploadsAvailable(true, attempt);
+  const [showAvailability, setShowAvailability] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -220,9 +223,12 @@ export function UploadButton({ className = "", targetPaper, onUploaded }: {
       <button
         type="button"
         // On a paper's page the words are on the button, and they are its name.
-        aria-label={targetPaper ? undefined : UPLOAD_BUTTON.label}
+        aria-label={targetPaper ? undefined : "upload pdf paper to deep read"}
         disabled={isUploading}
-        onClick={() => inputRef.current?.click()}
+        onClick={() => {
+          if (availability !== "available") { setShowAvailability(true); return; }
+          inputRef.current?.click();
+        }}
         onDragOver={(event) => {
           event.preventDefault();
           if (!isUploading) setIsDragOver(true);
@@ -232,6 +238,7 @@ export function UploadButton({ className = "", targetPaper, onUploaded }: {
           event.preventDefault();
           setIsDragOver(false);
           if (isUploading) return;
+          if (availability !== "available") { setShowAvailability(true); return; }
           const file = event.dataTransfer.files?.[0];
           if (file) chooseFile(file);
         }}
@@ -242,9 +249,7 @@ export function UploadButton({ className = "", targetPaper, onUploaded }: {
           buttonVariants({ tone: "ghost", size: "lg" }),
           "reader-action w-full justify-start gap-2 px-3 border border-dashed border-border-strong text-text-muted hover:border-text-faint [@media(hover:none)]:min-h-11",
           isDragOver && "border-accent text-heading",
-        ) : `group inline-flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-md bg-[color:var(--color-fixed-black)] transition-[opacity,transform] duration-150 ease-snap hover:scale-125 active:scale-90 disabled:scale-100 disabled:opacity-50 disabled:cursor-wait ${
-          isDragOver ? "opacity-75 scale-125" : ""
-        }`}
+        ) : cn("peer-write inline-flex min-h-11 md:min-h-8 items-center px-3 text-left disabled:opacity-50", isDragOver && "opacity-75")}
       >
         {/* 6-01: the whole square grows on hover now, not just the glyph —
             so the black square and the glyph swell together at one ratio.
@@ -262,22 +267,7 @@ export function UploadButton({ className = "", targetPaper, onUploaded }: {
             <UploadGlyph size={16} />
             {isUploading ? TARGET_UPLOAD.busy : TARGET_UPLOAD.label}
           </>
-        ) : <svg
-          width="15"
-          height="15"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden
-          className="text-[color:var(--color-fixed-white)]"
-        >
-          <path d="M12 16V4" />
-          <path d="M6 10l6-6 6 6" />
-          <path d="M4 20h16" />
-        </svg>}
+        ) : <>{isUploading ? "Uploading PDF…" : "upload pdf paper to deep read"}</>}
       </button>
       <input
         ref={inputRef}
@@ -292,6 +282,7 @@ export function UploadButton({ className = "", targetPaper, onUploaded }: {
           if (file) chooseFile(file);
         }}
       />
+      {showAvailability && <UploadAvailabilityMessage state={availability} onRetry={() => setAttempt((n) => n + 1)} />}
       {pendingFile && <UploadConsentDialog file={pendingFile} onCancel={() => setPendingFile(null)}
         onAccept={() => { const file = pendingFile; setPendingFile(null); void upload(file); }} />}
       {pendingMatch && targetPaper && (
