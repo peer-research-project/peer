@@ -4,6 +4,9 @@ import type { SourceId, RawItem } from "@/lib/sources/types";
 import { DblpBotCheckError } from "@/lib/sources/dblp";
 import { withSourceTimeout } from "@/lib/opportunities/shared";
 import { scoreItems } from "@/lib/scoring";
+import { discoverSeedNeighbors } from "@/lib/seed-pool/discovery";
+import { hasUsableSeed, diversifySeedRanking } from "@/lib/seed-pool/scoring";
+import type { SeedPaper, SeedSnapshot } from "@/lib/seed-pool/types";
 import { dropStale } from "./freshness";
 import type { ScoredItem, FeedAdmissionChannel } from "@/lib/scoring/types";
 import { dedupItems } from "./dedup";
@@ -264,6 +267,11 @@ function applyRRFOrder(
 }
 
 export interface FeedPipelineOptions {
+  /** Server-resolved only. Never construct from a client request. */
+  seedSnapshot?: SeedSnapshot;
+  seedTargetLocalDate?: string;
+  seedPoolVersion?: string;
+  seedRevocationGeneration?: number;
   cache?: PoolCache;
   now?: Date;
   /**
@@ -594,6 +602,7 @@ async function buildPaperPool(
   // parameter (not the whole options object) to keep this function's existing
   // signature narrow and additive.
   jevScreen?: JevScreenFn,
+  seedPapers: readonly SeedPaper[] = [],
 ): Promise<BuiltPaperPool> {
   // **THE PAPER SURFACE DOES NOT SPEND ANYONE'S SEARCH QUOTA, AT ALL.** Papers
   // come from the five free academic sources; the one Tavily channel this
@@ -841,9 +850,9 @@ async function buildPaperPool(
   // instead: bake a user's likes into the stored scores and every later read
   // that day would be ranked by a snapshot of their taste taken this morning.
   // The jobs pool makes the same split for the same reason.
-  const scored = scorePaperCandidates(fresh, req, brief, false);
+  const scored = scorePaperCandidates(fresh, req, brief, false, seedPapers);
 
-  const tier1Ranked = requestedTier >= 1 ? applyTier1Rerank(scored, brief) : scored;
+  const tier1Ranked = requestedTier >= 1 && seedPapers.length === 0 ? applyTier1Rerank(scored, brief) : scored;
 
   // P2-S6 RULING points 2/3 — flag on only. `rankedForJudgment` is the
   // order every downstream consumer (the Jev screen's shortlist, Tier-2's
@@ -851,7 +860,7 @@ async function buildPaperPool(
   // reads instead of `tier1Ranked` directly. Flag off: `rankedForJudgment`
   // IS `tier1Ranked` (the same reference, not a copy) and `rrfProvenance`
   // stays undefined — byte-identical to this slice never having existed.
-  const rrfApplied = rankFusionEnabled() ? applyRRFOrder(tier1Ranked, rrfChannels) : undefined;
+  const rrfApplied = seedPapers.length === 0 && rankFusionEnabled() ? applyRRFOrder(tier1Ranked, rrfChannels) : undefined;
   const rankedForJudgment = rrfApplied?.ranked ?? tier1Ranked;
   const rrfProvenance = rrfApplied?.provenanceByItemId;
 
@@ -869,7 +878,7 @@ async function buildPaperPool(
   // an empty shortlist; a screen that failed, or answered too few papers, or had
   // its key rejected, gives a plan with no order, and `afterJev` below is then
   // `rankedForJudgment` itself (the same reference: byte-identical to no Jev).
-  const jev = jevScreen ? await screenShortlist(rankedForJudgment, jevScreen) : null;
+  const jev = jevScreen && seedPapers.length === 0 ? await screenShortlist(rankedForJudgment, jevScreen) : null;
   const afterJev = jev?.orderedIds ? applyRerankOrder(rankedForJudgment, jev.orderedIds) : rankedForJudgment;
 
   // P2-S6 — `applyTier2Rerank`'s own internal `.slice(0, 50)` now slices
@@ -879,7 +888,7 @@ async function buildPaperPool(
   // pool membership follows RRF order too (RULING point 3) with no separate
   // membership-cut code needed. With Jev's order applied the list Tier 2 slices
   // is the same 50 papers, reordered.
-  const tier2 = requestedTier >= 2
+  const tier2 = requestedTier >= 2 && seedPapers.length === 0
     ? await applyTier2Rerank(afterJev, brief, req.llmOverride)
     : { items: afterJev, orderedIds: [] as string[], reasons: {} };
 
@@ -1173,6 +1182,7 @@ async function retryFailedSources(
   cache: PoolCache,
   key: string,
   counterStore: CounterStore,
+  seedPapers: readonly SeedPaper[] = [],
 ): Promise<CachedPaperPool> {
   const statusMap = pool.sourceStatus;
   if (!statusMap) return pool;
@@ -1271,8 +1281,8 @@ async function retryFailedSources(
     // (not just the delta) is deliberate; see this function's own doc
     // comment.
     const merged = dedupItems([...pool.items, ...newItems]);
-    const rescored = scorePaperCandidates(merged, req, brief, false);
-    const ranked = applyTier1Rerank(rescored, brief).slice(0, MAX_PAPER_POOL_ITEMS);
+    const rescored = scorePaperCandidates(merged, req, brief, false, seedPapers);
+    const ranked = (seedPapers.length ? rescored : applyTier1Rerank(rescored, brief)).slice(0, MAX_PAPER_POOL_ITEMS);
 
     return {
       ...pool,
@@ -1308,6 +1318,7 @@ function scorePaperCandidates(
   req: FeedRequest,
   brief: SearchBriefFor,
   includePreferenceLedger: boolean,
+  seedPapers: readonly SeedPaper[] = [],
 ): ScoredItem[] {
   return scoreItems(
     items,
@@ -1325,6 +1336,8 @@ function scorePaperCandidates(
       selectedSenseConcepts: req.intent?.selectedSenseConcepts,
     },
     req.weights,
+    Date.now(),
+    seedPapers,
   );
 }
 
@@ -1821,6 +1834,8 @@ export async function runFeedPipeline(
   // Paper pools contain membership and potentially Tier-2 reasons. Never use
   // the historic shared v5 adapter for them: unscoped requests stay useful but
   // are request-local, and scoped requests use an owner-qualified store.
+  if ((options.seedSnapshot || options.seedPoolVersion !== undefined) && !privateScope) throw new Error("Seed pool requires an owner-scoped paper cache");
+  const seedPapers = (options.seedSnapshot?.seeds ?? []).filter(hasUsableSeed);
   const cache = privateScope
     ? (options.cache ?? new PrivatePaperPoolCache(privateScope))
     : ephemeralPaperPoolCache;
@@ -1842,7 +1857,10 @@ export async function runFeedPipeline(
     paperOwnerId: privateScope?.ownerId,
     // A pool built with a reader's Jev order is its own pool. Only a boolean:
     // the key itself is not here, in `req`, or anywhere in this function.
-    jevScreening: options.jevScreen ? true : undefined,
+    jevScreening: options.jevScreen && !seedPapers.length ? true : undefined,
+    seedVersion: options.seedPoolVersion ?? options.seedSnapshot?.version,
+    seedRevocationGeneration: options.seedRevocationGeneration ?? options.seedSnapshot?.revocationGeneration,
+    targetLocalDate: options.seedPoolVersion !== undefined || options.seedSnapshot ? options.seedTargetLocalDate : undefined,
     now,
   });
 
@@ -1852,7 +1870,7 @@ export async function runFeedPipeline(
     key,
     isCachedPaperPool,
     async () => {
-      built = await buildPaperPool(req, brief, requestedTier, now, options.jevScreen);
+      built = await buildPaperPool(req, brief, requestedTier, now, options.jevScreen, seedPapers);
       return {
         surface: "papers",
         items: built.items,
@@ -1923,6 +1941,7 @@ export async function runFeedPipeline(
         cache,
         key,
         options.counterStore ?? getCounterStore(),
+        seedPapers,
       );
       if (retried !== pool) {
         pool = retried;
@@ -1990,13 +2009,15 @@ export async function runFeedPipeline(
     options.channelCandidateCache,
     options.counterStore ?? getCounterStore(),
   );
-  const poolItemsWithSeeds =
-    channelItems.length > 0
-      ? dedupItems([...poolItemsWithRollover, ...channelItems])
-      : poolItemsWithRollover;
+  const seedNeighbors = seedPapers.length ? await discoverSeedNeighbors(seedPapers) : [];
+  const merged = channelItems.length || seedNeighbors.length
+    ? dedupItems([...poolItemsWithRollover, ...channelItems, ...seedNeighbors])
+    : poolItemsWithRollover;
+  const ownSeeds = new Set(seedPapers.map((seed) => seed.canonicalKey));
+  const poolItemsWithSeeds = ownSeeds.size ? merged.filter((item) => !isDeliveredIdentity(identityForRawItem(item), ownSeeds)) : merged;
 
   const inWindow = dropStale(poolItemsWithSeeds, brief.timeWindow, now.getTime());
-  const scored = scorePaperCandidates(inWindow, req, brief, true);
+  const scored = scorePaperCandidates(inWindow, req, brief, true, seedPapers);
   // Runs at every tier, including 0. `applyTier1Rerank` is pure local
   // computation — weighted boosts plus a per-topic/per-author diversify pass,
   // no model call and no network — so it belongs to the floor that
@@ -2005,14 +2026,14 @@ export async function runFeedPipeline(
   // (`store/feed.ts`: `hasUserLlmOverride ? 2 : 0`), so for every user without
   // their own API key the diversify pass had never executed once and a single
   // author could take six of the ten slots.
-  const tier1Ranked = applyTier1Rerank(scored, brief);
+  const tier1Ranked = seedPapers.length ? scored : applyTier1Rerank(scored, brief);
   // Replays the ranking the LLM produced when the pool was built. On a Tier-0
   // pool `aiOrder` is empty and this is a no-op.
-  const aiRanked = applyRerankOrder(tier1Ranked, pool.aiOrder, pool.aiReasons);
+  const aiRanked = seedPapers.length ? tier1Ranked : applyRerankOrder(tier1Ranked, pool.aiOrder, pool.aiReasons);
   // Preferred-journal boost: applied LAST (after every rerank) so a paper
   // published in one of the user's preferred journals reliably floats up,
   // while an exceptionally strong non-journal match can still outrank it.
-  const journalRanked = applyJournalBoost(aiRanked, req.venues ?? []);
+  const journalRanked = seedPapers.length ? aiRanked : applyJournalBoost(aiRanked, req.venues ?? []);
   // Don't show items the caller already showed this user recently. Run
   // AFTER ranking so the score reflects the full candidate pool, but BEFORE
   // slicing so we still return `topN` fresh items.
@@ -2067,14 +2088,15 @@ export async function runFeedPipeline(
   // rollover candidates merged in (web/src/lib/feed/rollover.test.ts):
   // `fresh` can only be as large as the genuinely eligible candidate count,
   // rollover or not.
-  const returned = fresh.slice(0, topN);
+  const finalRanked = seedPapers.length ? diversifySeedRanking(fresh, seedPapers) : fresh;
+  const returned = finalRanked.slice(0, topN);
   // P4-S6 — `finalPool` is `fresh`'s own prefix (both are `.slice(0, N)` of
   // the SAME `fresh` array from index 0), so `returned` is ALWAYS a prefix
   // of `finalPool` whenever topN <= FINAL_POOL_SIZE — true for every
   // display count this product offers. See
   // FeedPipelineOptions.includeFinalPool's own doc comment for why this is
   // only computed/attached when explicitly requested.
-  const finalPool = options.includeFinalPool ? fresh.slice(0, FINAL_POOL_SIZE) : undefined;
+  const finalPool = options.includeFinalPool ? finalRanked.slice(0, FINAL_POOL_SIZE) : undefined;
 
   // Fetch diagnostics only exist for the request that actually built the pool.
   // A cache hit reports the pool's size rather than inventing source counts it

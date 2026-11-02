@@ -10,6 +10,8 @@ export interface SeedMatch { seedId: string; canonicalKey: string; score: number
 const FACETS: ReadonlyArray<{ name: SeedFacet; weight: number }> = [
   { name: "topic", weight: 0.5 }, { name: "object", weight: 0.3 }, { name: "method", weight: 0.2 },
 ];
+export const hasUsableSeed = (seed: MatchingSeed): boolean => Boolean(seed.canonicalKey)
+  && Object.values(seed.features).some((phrases: readonly string[]) => phrases.some((phrase: string) => tokenizeFolded(phrase).length > 0));
 const clamp = (n: number) => Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : 0;
 
 /** Match only extracted phrases actually present in the public candidate text. */
@@ -55,4 +57,26 @@ export function admitsBySeed(match: SeedMatch | undefined): boolean {
 export function mixSeedScore(seed: number, intent: number, feedback: number | null, recencySource: number): number {
   return clamp(0.4 * clamp(seed) + (feedback === null ? 0.5 : 0.35) * clamp(intent)
     + (feedback === null ? 0 : 0.15 * clamp(feedback)) + 0.1 * clamp(recencySource));
+}
+
+/** Promote a different genuinely matched seed only within a small score band. */
+export function diversifySeedRanking<T extends { title: string; abstract?: string; tags?: string[]; score: number }>(items: readonly T[], seeds: readonly MatchingSeed[]): T[] {
+  const remaining = [...items];
+  const out: T[] = [];
+  let previous: string | undefined;
+  while (remaining.length) {
+    const strongest = (item: T) => {
+      const match = strongestSeedMatches([item.title, item.abstract ?? "", ...(item.tags ?? [])].join(" "), seeds)[0];
+      return admitsBySeed(match) ? match?.canonicalKey : undefined;
+    };
+    let at = 0;
+    if (previous && strongest(remaining[0]) === previous) {
+      const alternate = remaining.findIndex((item, i) => i > 0 && remaining[0].score - item.score <= 0.03 && !!strongest(item) && strongest(item) !== previous);
+      if (alternate > 0) at = alternate;
+    }
+    const [chosen] = remaining.splice(at, 1);
+    out.push(chosen);
+    previous = strongest(chosen);
+  }
+  return out;
 }

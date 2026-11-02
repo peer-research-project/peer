@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { admitsBySeed, matchSeed, mixSeedScore, strongestSeedMatches, type MatchingSeed } from "./scoring";
+import { admitsBySeed, diversifySeedRanking, matchSeed, mixSeedScore, strongestSeedMatches, type MatchingSeed } from "./scoring";
 const seed = (id: string, canonicalKey: string, topic: string, object: string, method: string): MatchingSeed => ({ id, canonicalKey, features: { topic: [topic], object: [object], method: [method] } });
 const battery = seed("a", "doi:a", "solid electrolyte", "lithium oxide", "neutron diffraction");
 const ecology = seed("b", "doi:b", "forest canopy", "rainforest tree", "satellite imaging");
@@ -21,6 +21,15 @@ describe("seed matching", () => {
     expect(admitsBySeed(matchSeed("A solid electrolyte improves transport", battery))).toBe(true);
     expect(admitsBySeed(matchSeed("Neutron diffraction measured crystals", battery))).toBe(false);
     expect(admitsBySeed(undefined)).toBe(false);
+  });
+  it("balances distinct strong matches within a narrow score band", () => {
+    const rows = [
+      { id: "a1", title: "solid electrolyte lithium oxide", score: 0.9 },
+      { id: "a2", title: "solid electrolyte lithium oxide", score: 0.89 },
+      { id: "b1", title: "forest canopy rainforest tree", score: 0.88 },
+      { id: "b2", title: "forest canopy rainforest tree", score: 0.6 },
+    ];
+    expect(diversifySeedRanking(rows, [battery, ecology]).map((r) => r.id)).toEqual(["a1", "b1", "a2", "b2"]);
   });
   it("uses a separate normalized blend and returns the missing feedback weight to intent", () => {
     expect(mixSeedScore(1, 1, 1, 1)).toBeCloseTo(1);

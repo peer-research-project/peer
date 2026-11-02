@@ -716,3 +716,13 @@ describe("getOrBuildCachedPool — forced rebuild (R-POOL-2)", () => {
     expect(builds).toBe(1);
   });
 });
+
+
+it("separates seed versions, revocations, owner-local target dates and owners", () => {
+  const args = { surface: "papers" as const, requiredTopics: ["science"], now: new Date("2026-11-01T23:00:00Z"), paperOwnerId: "owner-a", paperScopeIdentity: "private" };
+  const today = derivePoolCacheKey({ ...args, seedVersion: "v1", seedRevocationGeneration: 0, targetLocalDate: "2026-11-01" });
+  expect(derivePoolCacheKey({ ...args, seedVersion: "v2", seedRevocationGeneration: 0, targetLocalDate: "2026-11-01" })).not.toBe(today);
+  expect(derivePoolCacheKey({ ...args, seedVersion: "v1", seedRevocationGeneration: 1, targetLocalDate: "2026-11-01" })).not.toBe(today);
+  expect(derivePoolCacheKey({ ...args, seedVersion: "v1", seedRevocationGeneration: 0, targetLocalDate: "2026-11-02" })).not.toBe(today);
+  expect(derivePoolCacheKey({ ...args, paperOwnerId: "owner-b", seedVersion: "v1", seedRevocationGeneration: 0, targetLocalDate: "2026-11-01" })).not.toBe(today);
+});

@@ -19,7 +19,7 @@ import { scoreSource } from "./source-weight";
 import { generateReason } from "./reason";
 import { shouldPushReviewPaper } from "./review-policy";
 import { normalizePhrase, tokenizeFolded } from "./tokenize";
-import { admitsBySeed, mixSeedScore, strongestSeedMatches, type MatchingSeed, type SeedMatch } from "@/lib/seed-pool/scoring";
+import { admitsBySeed, hasUsableSeed, mixSeedScore, strongestSeedMatches, type MatchingSeed, type SeedMatch } from "@/lib/seed-pool/scoring";
 import { canonicalize, termSpecificity } from "./term-expand";
 import {
   buildPreferenceDocumentFrequency,
@@ -188,7 +188,7 @@ export function scoreItems(
   const explicitFeedback = positiveEntries.length > 0 ? prepareLedger(Object.fromEntries(
     positiveEntries.map(([key, entry]) => [key, { ...entry, uploads: undefined, questions: undefined, negative: 0 }]),
   )) : undefined;
-  const seedEnabled = seedPapers.some((seed) => seed.canonicalKey && Object.values(seed.features).some((phrases) => phrases.some((phrase) => tokenizeFolded(phrase).length > 0)));
+  const seedEnabled = seedPapers.some(hasUsableSeed);
 
   const mustTopics = profile.topics;
   const selectedSenseConcepts = profile.selectedSenseConcepts ?? [];
