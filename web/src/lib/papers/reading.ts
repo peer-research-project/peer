@@ -101,7 +101,7 @@ export interface ReadingProvenance {
   abstractSentences: number;
   /** Semantic Scholar's TLDR — labelled as such on the page, never merged into the abstract. */
   tldr?: string;
-  fullText: "none" | "html" | "pdf" | "pdf_unreadable_here" | "pdf_empty" | "paywalled";
+  fullText: "none" | "html" | "pdf" | "pdf_unreadable_here" | "pdf_empty" | "paywalled" | "blocked";
   /** "arXiv HTML" | "Zenodo PDF" | "PMC" | "publisher page" … */
   sourceLabel?: string;
   /** PDFs only. */
@@ -109,6 +109,7 @@ export interface ReadingProvenance {
   /** Canonical buckets present, document order. */
   buckets: string[];
   paywallHost?: string;
+  blockedHost?: string;
 }
 
 export type ReadingSourceLabel =
@@ -578,6 +579,15 @@ function buildProvenance(
     if (host) base.paywallHost = host;
     return base;
   }
+  const blocked = fullText.status === "source_unavailable" && fullText.attempts.find((attempt) =>
+    /^source_unavailable: .* blocked this request/i.test(attempt.outcome),
+  );
+  if (blocked) {
+    base.fullText = "blocked";
+    const finalUrl = (blocked as typeof blocked & { finalUrl?: string }).finalUrl;
+    base.blockedHost = hostOf(finalUrl ?? blocked.link.url);
+    return base;
+  }
   if (pdfUnreadableHere(fullText)) base.fullText = "pdf_unreadable_here";
   else if (pdfHasNoText(fullText)) base.fullText = "pdf_empty";
   return base;
@@ -969,6 +979,11 @@ function readingSentence(reading: PaperReading, providerConfigured: boolean, key
   const sectionsRead = provenance.fullText === "html" || provenance.fullText === "pdf";
   const plain = (sentence: string): ReadingSentence => ({ sentence, asksForKey: false });
 
+  if (provenance.fullText === "blocked") {
+    const host = provenance.blockedHost ?? "The source";
+    const lead = provenance.abstract === "none" ? "No abstract is available. " : "Abstract only. ";
+    return plain(`${lead}${host} blocked this request, so Peer could not read the full paper.`);
+  }
   if (provenance.abstract === "none" && !sectionsRead) {
     return plain(provenance.tldr ? NO_ABSTRACT_TLDR : NO_ABSTRACT);
   }
@@ -1054,6 +1069,9 @@ function fullTextClause(reading: PaperReading, report: AvailabilityReport): stri
   const { provenance } = reading;
   if (!report.deepRequested) {
     return " Caveats and a next step need the full text — turn on deep reports in Profile.";
+  }
+  if (provenance.fullText === "blocked") {
+    return ` Caveats and a next step need the full text; ${provenance.blockedHost ?? "the source"} blocked this request.`;
   }
   if (provenance.fullText === "paywalled") {
     const host = provenance.paywallHost ?? "the publisher";
