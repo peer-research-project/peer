@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ table: vi.fn(), rpc: vi.fn() }));
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => ({ from: mocks.table, rpc: mocks.rpc }) }));
-import { ackSeedBatch, claimSeedDigest, markSeedBatchServed, putSeedPreparedBatch, resolveSeedPool, validateSeedDigestSend } from "./server";
+import { ackSeedBatch, claimSeedDigest, markSeedBatchServed, persistSeedDigestEmailAttempt, putSeedPreparedBatch, recordSeedFeedServed, resolveSeedPool, validateSeedDigestSend } from "./server";
 const selectResult = (error: null | { code: string }) => ({ select: () => ({ limit: async () => ({ error }) }) });
 beforeEach(() => { mocks.table.mockReset(); mocks.rpc.mockReset(); });
 describe("server seed resolution", () => {
@@ -40,6 +40,15 @@ describe("server seed resolution", () => {
     expect(await validateSeedDigestSend({ ...base, deliveryId: 4 })).toMatchObject({ status: "stale_pool" });
     expect(mocks.rpc.mock.calls.map(([name]) => name)).toEqual(["seed_pool_claim_digest", "seed_pool_validate_digest_send"]);
     for (const [, args] of mocks.rpc.mock.calls) expect(args).toMatchObject({ p_owner_id: "owner-a", p_local_date: "2026-03-08", p_expected_version: "v2", p_expected_revocation_generation: 3 });
+  });
+
+  it("uses the seed fence for email persistence and flag-off served markers", async () => {
+    mocks.rpc.mockResolvedValue({ data: { status: "stale_pool" }, error: null });
+    const base = { ownerId: "owner-a", localDate: "2026-03-08", expectedVersion: "v2", expectedRevocationGeneration: 3 };
+    expect(await persistSeedDigestEmailAttempt({ ...base, deliveryId: 4, email: { html: "invented" } })).toMatchObject({ status: "stale_pool" });
+    expect(await recordSeedFeedServed(base)).toMatchObject({ status: "stale_pool" });
+    expect(mocks.rpc.mock.calls.map(([name]) => name)).toEqual(["seed_pool_persist_digest_email", "seed_pool_record_feed_served"]);
+    expect(mocks.rpc.mock.calls[0][1]).toMatchObject({ p_delivery_id: 4, p_email: { html: "invented" }, p_expected_revocation_generation: 3 });
   });
 
 });

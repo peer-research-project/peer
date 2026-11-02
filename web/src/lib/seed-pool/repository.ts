@@ -61,7 +61,7 @@ export class SeedPoolRepository {
       return data;
     } catch { return null; }
   }
-  async outputFence(name: "seed_pool_mark_batch_served" | "seed_pool_put_prepared_batch" | "seed_pool_ack_batch" | "seed_pool_claim_digest" | "seed_pool_validate_digest_send" | "seed_pool_record_feed_served", args: Record<string, unknown>): Promise<SeedRpcOutcome | null> {
+  async outputFence(name: "seed_pool_mark_batch_served" | "seed_pool_put_prepared_batch" | "seed_pool_ack_batch" | "seed_pool_claim_digest" | "seed_pool_validate_digest_send" | "seed_pool_record_feed_served" | "seed_pool_persist_digest_email", args: Record<string, unknown>): Promise<SeedRpcOutcome | null> {
     return this.rpc(name, args);
   }
 }

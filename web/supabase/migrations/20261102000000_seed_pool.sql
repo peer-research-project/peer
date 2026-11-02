@@ -109,7 +109,7 @@ end $$;
 
 create or replace function public.seed_pool_forget(p_owner_id uuid,p_expected_revision bigint,p_seed_id uuid)
 returns jsonb language plpgsql security definer set search_path = public, pg_temp as $$
-declare v_state public.seed_pool_state%rowtype; v_key text; v_hash text; v_status text; v_ids uuid[]; v_objects jsonb;
+declare v_state public.seed_pool_state%rowtype; v_key text; v_hash text; v_status text; v_ids uuid[]; v_versions text[]; v_objects jsonb;
 begin
   perform pg_advisory_xact_lock(hashtextextended(p_owner_id::text, 725113));
   insert into public.seed_pool_state(owner_id) values(p_owner_id) on conflict do nothing;
@@ -130,10 +130,21 @@ begin
     select a.id,a.canonical_key,a.content_hash from public.seed_pool_assets a join related r on a.canonical_key=r.canonical_key or a.content_hash=r.content_hash where a.owner_id=p_owner_id and a.status<>'revoked'
   ) select array_agg(a.id),coalesce(jsonb_agg(jsonb_build_object('id',a.id::text,'objectName',a.object_name,'cleanupAfter',case when a.status='staging' then greatest(now()+interval '2 minutes', a.created_at+interval '3 minutes') else now() end)),'[]'::jsonb) into v_ids,v_objects
     from public.seed_pool_assets a where a.owner_id=p_owner_id and a.id in (select id from related);
+  select coalesce(array_agg(s.version::text),'{}'::text[]) into v_versions
+    from public.seed_pool_snapshots s where s.owner_id=p_owner_id and exists
+      (select 1 from jsonb_array_elements(s.seeds) e where (e->>'id')::uuid=any(v_ids));
   update public.seed_pool_assets set cleanup_after=case when status='staging' then greatest(now()+interval '2 minutes',created_at+interval '3 minutes') else now() end,status='revoked',features='{}'::jsonb,public_ids='{}'::jsonb,title='',canonical_key='revoked:'||p_seed_id::text,content_hash='',upload_id=''
     where owner_id=p_owner_id and id=any(v_ids);
   update public.seed_pool_snapshots s set seeds=coalesce((select jsonb_agg(e) from jsonb_array_elements(s.seeds) e where not ((e->>'id')::uuid=any(v_ids))),'[]'::jsonb) where s.owner_id=p_owner_id;
   update public.seed_pool_state set revision=revision+1,revocation_generation=revocation_generation+1 where owner_id=p_owner_id;
+  -- Pool membership and order are derived too. Invalidate affected batches
+  -- (the FK cascades delivery identities), and keep only the digest's minimal
+  -- delivery/idempotency row; already-sent messages cannot be recalled.
+  delete from public.private_paper_pools where owner_id=p_owner_id;
+  delete from public.dashboard_rollover_candidates where owner_id=p_owner_id;
+  delete from public.dashboard_batches where owner_id=p_owner_id and seed_pool_version=any(v_versions);
+  update public.briefing_deliveries set payload='{}'::jsonb,item_ids='{}'::text[]
+    where user_id=p_owner_id and seed_pool_version=any(v_versions);
   return jsonb_build_object('status','revoked','objects',v_objects,'revision',v_state.revision+1,'revocationGeneration',v_state.revocation_generation+1);
 end $$;
 
@@ -317,3 +328,21 @@ begin
 end $$;
 revoke all on function public.seed_pool_record_feed_served(uuid,date,text,bigint) from public,anon,authenticated;
 grant execute on function public.seed_pool_record_feed_served(uuid,date,text,bigint) to service_role;
+
+-- Do not restore a stale captured payload after forget: mutate only its email
+-- member under the same owner/version/revocation lock used by pool changes.
+create or replace function public.seed_pool_persist_digest_email(p_owner_id uuid,p_local_date date,p_delivery_id bigint,p_expected_version text,p_expected_revocation_generation bigint,p_email jsonb)
+returns jsonb language plpgsql security definer set search_path=public,pg_temp as $$
+declare v_row public.briefing_deliveries%rowtype;
+begin
+  perform pg_advisory_xact_lock(hashtextextended(p_owner_id::text,725113));
+  if public.seed_pool_fence_matches(p_owner_id,p_local_date,p_expected_version,p_expected_revocation_generation) is not true then return jsonb_build_object('status','stale_pool'); end if;
+  select * into v_row from public.briefing_deliveries where id=p_delivery_id and user_id=p_owner_id and local_date=p_local_date::text for update;
+  if not found then return jsonb_build_object('status','not_found'); end if;
+  if coalesce(v_row.seed_pool_version,'none')<>p_expected_version or v_row.seed_revocation_generation<>p_expected_revocation_generation then return jsonb_build_object('status','stale_pool'); end if;
+  if jsonb_typeof(p_email) <> 'object' then return jsonb_build_object('status','invalid'); end if;
+  update public.briefing_deliveries set payload=jsonb_set(coalesce(payload,'{}'::jsonb),'{email}',p_email,true) where id=p_delivery_id and user_id=p_owner_id;
+  return jsonb_build_object('status','persisted');
+end $$;
+revoke all on function public.seed_pool_persist_digest_email(uuid,date,bigint,text,bigint,jsonb) from public,anon,authenticated;
+grant execute on function public.seed_pool_persist_digest_email(uuid,date,bigint,text,bigint,jsonb) to service_role;

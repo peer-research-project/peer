@@ -19,7 +19,7 @@ export async function resolveSeedPool(ownerId: string, options: ResolveSeedPoolO
 export interface SeedBatchFence { ownerId: string; localDate: string; expectedVersion: string; expectedRevocationGeneration: number }
 export interface SeedBatchIdentity extends SeedBatchFence { batchId: string }
 export interface SeedPreparedBatch extends SeedBatchFence { intentVersion?: string; papers: unknown[]; servedItems: unknown[] }
-async function fence(name: "seed_pool_mark_batch_served" | "seed_pool_put_prepared_batch" | "seed_pool_ack_batch" | "seed_pool_claim_digest" | "seed_pool_validate_digest_send" | "seed_pool_record_feed_served", args: Record<string, unknown>): Promise<SeedRpcOutcome | null> {
+async function fence(name: "seed_pool_mark_batch_served" | "seed_pool_put_prepared_batch" | "seed_pool_ack_batch" | "seed_pool_claim_digest" | "seed_pool_validate_digest_send" | "seed_pool_record_feed_served" | "seed_pool_persist_digest_email", args: Record<string, unknown>): Promise<SeedRpcOutcome | null> {
   try { return await new SeedPoolRepository(createAdminClient()).outputFence(name, args); } catch { return null; }
 }
 const common = (input: SeedBatchFence) => ({ p_owner_id: input.ownerId, p_local_date: input.localDate, p_expected_version: input.expectedVersion, p_expected_revocation_generation: input.expectedRevocationGeneration });
@@ -47,4 +47,9 @@ export function validateSeedDigestSend(input: SeedDigestSend): Promise<SeedRpcOu
 /** Records only an owner/date marker under the same fence; no candidate payload. */
 export function recordSeedFeedServed(input: SeedBatchFence): Promise<SeedRpcOutcome | null> {
   return fence("seed_pool_record_feed_served", common(input));
+}
+
+/** Seeded email persistence must succeed before sending; it never rewrites a captured payload. */
+export function persistSeedDigestEmailAttempt(input: SeedDigestSend & { email: unknown }): Promise<SeedRpcOutcome | null> {
+  return fence("seed_pool_persist_digest_email", { ...common(input), p_delivery_id: input.deliveryId, p_email: input.email });
 }
