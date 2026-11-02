@@ -108,6 +108,7 @@ export interface SemanticScholarRecommendationsOptions {
   /** Results to keep, clamped to [1, RECOMMENDATIONS_MAX_LIMIT]. Defaults to DEFAULT_LIMIT. */
   limit?: number;
   timeoutMs?: number;
+  privateRequest?: boolean;
 }
 
 /** Strips a leading "semantic_scholar:" RawItem-style prefix, if present — S2's own API wants bare paper ids. */
@@ -180,6 +181,7 @@ export async function fetchSemanticScholarRecommendations(
       url,
       {
         method: "POST",
+        ...(opts.privateRequest ? { cache: "no-store" as const } : {}),
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       },
@@ -199,7 +201,7 @@ export async function fetchSemanticScholarRecommendations(
     const data = (await res.json()) as S2RecommendationsResponse;
     return (data.recommendedPapers ?? []).map(recommendedPaperToRawItem);
   } catch (err) {
-    console.error(
+    if (!opts.privateRequest) console.error(
       "[semantic-scholar-recommendations] fetch error:",
       err instanceof Error ? err.message : err,
     );

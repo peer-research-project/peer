@@ -242,7 +242,7 @@ export interface AdvisorSeeds {
 export async function fetchAdvisorSeeds(
   authorId: string,
   projectText: string,
-  opts: { limit?: number; yearsBack?: number } = {},
+  opts: { limit?: number; yearsBack?: number; privateRequest?: boolean } = {},
 ): Promise<AdvisorSeeds> {
   const limit = opts.limit ?? 8;
   const yearsBack = opts.yearsBack ?? 3;
@@ -339,7 +339,7 @@ export async function fetchCitationNeighborhood(
   try {
     const res = await sourceFetch(`${OPENALEX}/works?${params}`, {
       timeoutMs: 7000,
-      revalidate: 21_600,
+      ...(opts.privateRequest ? { noStore: true } : { revalidate: 21_600 }),
       headers: openAlexAuthHeaders(),
     });
     if (!res.ok) {
@@ -348,7 +348,7 @@ export async function fetchCitationNeighborhood(
     const data = (await res.json()) as { results?: OpenAlexWork[] };
     return (data.results ?? []).map(openAlexWorkToRawItem).slice(0, limit);
   } catch (err) {
-    console.error(
+    if (!opts.privateRequest) console.error(
       "[affiliation openalex] citation neighborhood fetch error:",
       err instanceof Error ? err.message : err,
     );

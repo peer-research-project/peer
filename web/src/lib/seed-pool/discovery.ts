@@ -13,9 +13,9 @@ interface PublicClients {
   resolveDoi?(doi: string): Promise<{ workId: string; title: string }>;
 }
 const clients: PublicClients = {
-  citations: (ids) => fetchCitationNeighborhood(ids, { limit: 40 }),
-  recommendations: (ids) => fetchSemanticScholarRecommendations(ids, { limit: 25 }),
-  resolveDoi: (doi) => resolveOpenAlexSeed(doi, { timeoutMs: 2500 }),
+  citations: (ids) => fetchCitationNeighborhood(ids, { limit: 40, privateRequest: true }),
+  recommendations: (ids) => fetchSemanticScholarRecommendations(ids, { limit: 25, privateRequest: true }),
+  resolveDoi: (doi) => resolveOpenAlexSeed(doi, { timeoutMs: 2500, fetchImpl: (url, init) => fetch(url, { ...init, cache: "no-store" }) }),
 };
 
 /** Only verified public identifiers leave this process. No extracted feature,
