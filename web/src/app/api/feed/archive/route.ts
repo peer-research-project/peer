@@ -62,13 +62,15 @@
 // servable yet, but something is quietly being prepared").
 //
 // **Validation order** mirrors the ack route exactly: flag check (sync,
-// cheap) -> date-shape/future validation (sync, cheap, no I/O) -> auth (I/O)
-// -> ledger availability -> business logic. Shape validation runs BEFORE
+// cheap) -> date-shape validation (no I/O) -> auth -> owner-local future
+// validation -> ledger availability -> business logic. Shape validation runs BEFORE
 // auth on purpose, same as the ack route's batchId check -- there is no
 // reason to pay for a network auth round trip on a request that is
 // syntactically invalid regardless of who is asking.
 
 import { NextResponse, type NextRequest } from "next/server";
+import { resolveSeedPool } from "@/lib/seed-pool/server";
+import { seedOutputContext } from "@/lib/seed-pool/output";
 import { createClient } from "@/lib/supabase/server";
 import { localCalendarDate } from "@/lib/local-calendar-date";
 import { dashboardLedgerEnabled } from "@/lib/dashboard/ledger-flag";
@@ -121,13 +123,7 @@ export async function GET(request: NextRequest) {
     if (!isValidCalendarDate(dateParam)) {
       return json({ error: "invalid_date" }, 400);
     }
-    // "Local date" uses the SAME server-local-calendar convention as
-    // web/src/app/api/feed/route.ts's own localCalendarDate(now) for batch
-    // keys -- string comparison is safe because the format is a fixed-width
-    // YYYY-MM-DD (lexicographic order equals chronological order).
-    if (dateParam > localCalendarDate(new Date())) {
-      return json({ error: "future_date" }, 400);
-    }
+
   }
 
   const supabase = await createClient();
@@ -136,6 +132,13 @@ export async function GET(request: NextRequest) {
   } = await supabase.auth.getUser();
   if (!user) {
     return json({ error: "unauthenticated" }, 401);
+  }
+
+  if (dateParam !== null) {
+    const context = seedOutputContext(await resolveSeedPool(user.id));
+    if (context.kind === "unavailable") return json({ error: "ledger_unavailable" }, 503);
+    const today = context.kind === "legacy" ? localCalendarDate(new Date()) : context.localDate;
+    if (dateParam > today) return json({ error: "future_date" }, 400);
   }
 
   const ledger = new SupabaseDashboardDeliveryLedger();

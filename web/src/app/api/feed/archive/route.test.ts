@@ -17,6 +17,7 @@ import { NextRequest } from "next/server";
 
 const mocks = vi.hoisted(() => ({
   getUser: vi.fn(),
+  resolveSeedPool: vi.fn(),
   getBatch: vi.fn(),
   listServedBatchDates: vi.fn(),
   readExclusions: vi.fn(),
@@ -24,6 +25,9 @@ const mocks = vi.hoisted(() => ({
   requireAiRequest: vi.fn(),
   aiTierCeiling: vi.fn(),
 }));
+
+// The existing archive flow runs with the explicitly absent seed schema.
+vi.mock("@/lib/seed-pool/server", () => ({ resolveSeedPool: mocks.resolveSeedPool, putSeedPreparedBatch: vi.fn(), markSeedBatchServed: vi.fn(), recordSeedFeedServed: vi.fn(), ackSeedBatch: vi.fn(), putSeedPrivatePool: vi.fn() }));
 
 vi.mock("@/lib/supabase/server", () => ({
   createClient: () => Promise.resolve({ auth: { getUser: mocks.getUser } }),
@@ -144,6 +148,7 @@ function stubSignedIn(userId: string) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.resolveSeedPool.mockResolvedValue({ status: "none", schemaInstalled: false, ownerLocalDate: null, timezone: null, snapshot: null, revision: 0, revocationGeneration: 0 });
   vi.useFakeTimers();
   vi.setSystemTime(new Date(2026, 8, 24, 12, 0)); // 2026-09-24, local
   vi.stubEnv("PEER_DASHBOARD_LEDGER", "on");
@@ -217,14 +222,14 @@ describe("GET /api/feed/archive -- date validation (pure, before auth or the led
     expect(ledgerMocks.ctor).not.toHaveBeenCalled();
   });
 
-  it("rejects a future date with 400 future_date, touching neither auth nor the ledger", async () => {
+  it("rejects a future date after checking the signed-in owner, without touching the ledger", async () => {
     // System time stubbed to 2026-09-24 in beforeEach.
     const response = await GET(request("date=2026-09-25"));
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({ error: "future_date" });
     expect(response.headers.get("Cache-Control")).toBe("private, no-store");
-    expect(mocks.getUser).not.toHaveBeenCalled();
+    expect(mocks.getUser).toHaveBeenCalled();
     expect(ledgerMocks.ctor).not.toHaveBeenCalled();
   });
 
@@ -459,4 +464,24 @@ describe("dashboard ledger end-to-end: archive stays stable across days (P4-S9 k
     expect(archiveList.status).toBe(200);
     expect(archiveListBody.dates).toContain("2026-09-24");
   });
+});
+
+
+it("uses the owner's Tokyo date even when server-local date is earlier", async () => {
+  mocks.resolveSeedPool.mockResolvedValue({ status: "none", schemaInstalled: true, ownerLocalDate: "2026-09-25", timezone: "Asia/Tokyo", snapshot: null, revision: 0, revocationGeneration: 0 });
+  useMinimalFakeLedger();
+  mocks.getBatch.mockResolvedValue({ id: "b", ownerId: "owner-1", localDate: "2026-09-25", status: "served", servedItems: [scoredItem("tokyo")] });
+  const today = await GET(request("date=2026-09-25"));
+  expect(today.status).toBe(200);
+  expect((await today.json()).items[0].id).toBe("tokyo");
+  const future = await GET(request("date=2026-09-26"));
+  expect(future.status).toBe(400);
+  expect(await future.json()).toEqual({ error: "future_date" });
+});
+
+it("does not treat an unavailable owner date as legacy", async () => {
+  mocks.resolveSeedPool.mockResolvedValue({ status: "unavailable", schemaInstalled: null, ownerLocalDate: null, timezone: null, snapshot: null, revision: null, revocationGeneration: 0 });
+  const response = await GET(request("date=2026-09-20"));
+  expect(response.status).toBe(503);
+  expect(ledgerMocks.ctor).not.toHaveBeenCalled();
 });
