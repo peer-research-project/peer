@@ -19,6 +19,7 @@ import { scoreSource } from "./source-weight";
 import { generateReason } from "./reason";
 import { shouldPushReviewPaper } from "./review-policy";
 import { normalizePhrase, tokenizeFolded } from "./tokenize";
+import { admitsBySeed, mixSeedScore, strongestSeedMatches, type MatchingSeed, type SeedMatch } from "@/lib/seed-pool/scoring";
 import { canonicalize, termSpecificity } from "./term-expand";
 import {
   buildPreferenceDocumentFrequency,
@@ -157,6 +158,7 @@ export function scoreItems(
   profile: ScoringProfile,
   weights: ScoreWeights = DEFAULT_WEIGHTS,
   now = Date.now(),
+  seedPapers: readonly MatchingSeed[] = [],
 ): ScoredItem[] {
   if (items.length === 0) return [];
   const w = normalizeWeights(weights);
@@ -180,6 +182,13 @@ export function scoreItems(
   // Clean + index the ledger once for the whole batch (was re-cleaned + scanned
   // per item before).
   const preparedLedger = prepareLedger(profile.preferenceLedger);
+  // Isolate explicit positive feedback from upload/question evidence: the
+  // seed branch blends it once, separately from intent and source/recency.
+  const positiveEntries = Object.entries(profile.preferenceLedger ?? {}).filter(([, entry]) => entry.positive > 0);
+  const explicitFeedback = positiveEntries.length > 0 ? prepareLedger(Object.fromEntries(
+    positiveEntries.map(([key, entry]) => [key, { ...entry, uploads: undefined, questions: undefined, negative: 0 }]),
+  )) : undefined;
+  const seedEnabled = seedPapers.some((seed) => seed.canonicalKey && Object.values(seed.features).some((phrases) => phrases.some((phrase) => tokenizeFolded(phrase).length > 0)));
 
   const mustTopics = profile.topics;
   const selectedSenseConcepts = profile.selectedSenseConcepts ?? [];
@@ -214,10 +223,12 @@ export function scoreItems(
     kw: ReturnType<typeof scoreKeyword>;
     softKw: ReturnType<typeof scoreKeyword>;
     tf: number;
+    seedMatches: SeedMatch[];
   }[] = [];
   for (const item of items) {
     if (exclusions.some((term) => topicMatchesItem(item, term))) continue;
     if (profile.minPublishedAt && item.publishedAt < profile.minPublishedAt) continue;
+    const seedMatches = seedEnabled ? strongestSeedMatches([item.title, item.abstract ?? "", ...(item.tags ?? [])].join(" "), seedPapers) : [];
     let kw = scoreKeyword(item, literalMustTopics, {
       grounded: true,
       selectedSenseConcepts,
@@ -343,12 +354,13 @@ export function scoreItems(
     }
     // Required literals route/score candidate discovery. They cannot evict a
     // candidate already admitted by another declared retrieval channel.
-    if ((literalMustTopics.length > 0 || selectedSenseConcepts.length > 0) && kw.score === 0 && !admittedByNonLiteralChannel) continue;
+    if ((literalMustTopics.length > 0 || selectedSenseConcepts.length > 0) && kw.score === 0 && !admittedByNonLiteralChannel && !admitsBySeed(seedMatches[0])) continue;
     passed.push({
       item,
       kw,
       softKw: scoreKeyword(item, softTopics, { grounded: true }),
       tf: clamp01(scoreTfidf(item.id, pText, index)),
+      seedMatches,
     });
   }
 
@@ -359,7 +371,7 @@ export function scoreItems(
   const topicality = poolPercentile(passed.map((p) => p.tf));
 
   const scored: ScoredItem[] = [];
-  passed.forEach(({ item, kw, softKw, tf }, i) => {
+  passed.forEach(({ item, kw, softKw, tf, seedMatches }, i) => {
     const tp = topicality[i];
     const rc = clamp01(scoreRecency(item.publishedAt, now));
     const sr = clamp01(scoreSource(item.source, profile.sourceWeights));
@@ -390,9 +402,13 @@ export function scoreItems(
     // (Explore topics, the preference ledger) this item's Required-tag
     // demotion says nothing about.
     const senseContextPenalty = kw.fullyDemoted ? SENSE_CONTEXT_DEMOTED_GROUNDING : 1;
-    const combined = clamp01(
-      base * preference.penalty * senseContextPenalty + softBonus + preference.boost,
-    );
+    const explicit = explicitFeedback ? scorePreferenceMatch(item, explicitFeedback, mustTopics, {
+      now, documentFrequency: preferenceDocumentFrequency, corpusSize: items.length,
+    }) : null;
+    const combined = seedEnabled
+      ? mixSeedScore(seedMatches[0]?.score ?? 0, ((kw.score + tf) / 2) * senseContextPenalty,
+          explicit ? clamp01(explicit.boost / 0.18) : null, (rc + sr) / 2)
+      : clamp01(base * preference.penalty * senseContextPenalty + softBonus + preference.boost);
     const breakdown: ScoreBreakdown = {
       keyword: kw.score,
       tfidf: tf,
@@ -406,7 +422,9 @@ export function scoreItems(
       score: combined,
       scoreBreakdown: breakdown,
       matchedKeywords: kw.matched,
-      relevanceReason: generateReason(item, kw.matched, breakdown),
+      relevanceReason: seedEnabled && seedMatches[0]?.hits.length
+        ? `Shares ${seedMatches[0].hits.slice(0, 2).map((hit) => hit.phrase).join(" and ")} with a seed paper.`
+        : generateReason(item, kw.matched, breakdown),
     });
   });
 
