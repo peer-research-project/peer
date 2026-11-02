@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-const mocks = vi.hoisted(() => ({ context: vi.fn(), enabled: vi.fn(() => true), origin: vi.fn(() => true), extract: vi.fn(), doi: vi.fn(), build: vi.fn(), write: vi.fn(), remove: vi.fn(), resolve: vi.fn(), stage: vi.fn(), finish: vi.fn(), deleteRow: vi.fn() }));
+const mocks = vi.hoisted(() => ({ context: vi.fn(), enabled: vi.fn(() => true), origin: vi.fn(() => true), extract: vi.fn(), doi: vi.fn(), build: vi.fn(), write: vi.fn(), remove: vi.fn(), resolve: vi.fn(), stage: vi.fn(), finish: vi.fn(), deleteRow: vi.fn(), stagedOwner: vi.fn(() => false), stagedRead: vi.fn(), stagedRemove: vi.fn() }));
 vi.mock("@/lib/seed-pool/auth", () => ({ seedRequestContext: mocks.context }));
 vi.mock("@/lib/papers/upload-access", () => ({ hostedUploadsEnabled: mocks.enabled, sameOriginUploadRequest: mocks.origin, UPLOAD_RIGHTS_VERSION: "rights-v1", PRIVATE_UPLOAD_HEADERS: { "Cache-Control": "private, no-store" } }));
-vi.mock("@/lib/papers/upload-store", () => ({ isOwnStagedUpload: () => false, readStagedUpload: vi.fn(), removeStagedUpload: vi.fn() }));
+vi.mock("@/lib/papers/upload-store", () => ({ isOwnStagedUpload: mocks.stagedOwner, readStagedUpload: mocks.stagedRead, removeStagedUpload: mocks.stagedRemove }));
 vi.mock("@/lib/papers/pdf-text", () => ({ extractPdfTextFromBytes: mocks.extract }));
 vi.mock("@/lib/seed-pool/features", () => ({ verifiedPublicDoi: mocks.doi, seedFromExtractedDocument: mocks.build }));
 vi.mock("@/lib/papers/upload-backend", () => ({ uploadBackend: () => ({ write: mocks.write, remove: mocks.remove }) }));
@@ -12,7 +12,7 @@ const owner = "22222222-2222-4222-8222-222222222222";
 const paper = { id, uploadId: `seed:${id}`, canonicalKey: "sha256:test", contentHash: "a".repeat(64), title: "Fictional", features: { topic: ["cathode"], object: [], method: [] } };
 function request() { const form = new FormData(); form.set("rightsVersion", "rights-v1"); form.set("file", new File(["%PDF-1.4 fictional"], "seed.pdf", { type: "application/pdf" })); return new Request("http://localhost", { method: "POST", body: form }); }
 beforeEach(() => {
-  vi.clearAllMocks(); mocks.enabled.mockReturnValue(true); mocks.origin.mockReturnValue(true);
+  vi.clearAllMocks(); mocks.stagedOwner.mockReturnValue(false); mocks.stagedRemove.mockResolvedValue(undefined); mocks.enabled.mockReturnValue(true); mocks.origin.mockReturnValue(true);
   mocks.context.mockResolvedValue({ status: "ready", ownerId: owner, repo: { resolve: mocks.resolve, stageAsset: mocks.stage, finishAsset: mocks.finish, removeAssetRecord: mocks.deleteRow } });
   mocks.resolve.mockResolvedValue({ status: "none", revocationGeneration: 7 });
   mocks.extract.mockResolvedValue({ ok: true, doc: { title: "Fictional", sections: [] } });
@@ -45,3 +45,17 @@ describe("private seed asset upload", () => {
   });
 
 });
+
+ it("does not create a ready seed when consuming a direct-upload copy fails", async () => {
+  mocks.stagedOwner.mockReturnValue(true); mocks.stagedRead.mockResolvedValue(Buffer.from("%PDF-1.4 fictional"));
+  mocks.remove.mockRejectedValueOnce(new Error("storage unavailable"));
+  const form = new FormData(); form.set("rightsVersion", "rights-v1"); form.set("staged", "incoming/owner/file.pdf");
+  const response = await POST(new Request("http://localhost", { method: "POST", body: form }));
+  expect(response.status).toBe(503); expect(mocks.stage).not.toHaveBeenCalled(); expect(mocks.write).not.toHaveBeenCalled();
+ });
+ it("consumes the direct-upload copy before staging a seed", async () => {
+  mocks.stagedOwner.mockReturnValue(true); mocks.stagedRead.mockResolvedValue(Buffer.from("%PDF-1.4 fictional"));
+  const form = new FormData(); form.set("rightsVersion", "rights-v1"); form.set("staged", "incoming/owner/file.pdf");
+  expect((await POST(new Request("http://localhost", { method: "POST", body: form }))).status).toBe(200);
+  expect(mocks.remove.mock.invocationCallOrder[0]).toBeLessThan(mocks.stage.mock.invocationCallOrder[0]);
+ });

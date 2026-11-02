@@ -36,6 +36,11 @@ export async function POST(req: Request) {
       const read = await readStagedUpload(ownerKey, staged);
       if (!read) return reply({ error: "No PDF file was attached." }, 400);
       bytes = read;
+      // Consume the temporary copy before creating a durable seed. A failed
+      // removal must not be hidden behind a successful later forget.
+      try { await uploadBackend().remove([staged]); }
+      catch { return reply({ error: "Could not finish the private upload. Try again." }, 503); }
+      stagedName = undefined;
     } else return reply({ error: "No PDF file was attached." }, 400);
     if (bytes.length > MAX_BYTES) return reply({ error: "That PDF is larger than 25 MB." }, 413);
     if (bytes.subarray(0, 5).toString("ascii") !== "%PDF-") return reply({ error: "That file is not a PDF." }, 415);
