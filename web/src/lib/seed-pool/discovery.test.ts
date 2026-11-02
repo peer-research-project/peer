@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { discoverSeedNeighbors } from "./discovery";
 import type { SeedPaper } from "./types";
-const seed: SeedPaper = { id: "private-id", uploadId: "private-upload", canonicalKey: "doi:1", title: "Private title", features: { topic: ["private phrase"], object: [], method: [] }, publicIds: { openAlexId: "W123", semanticScholarId: "a".repeat(40) } };
+const seed: SeedPaper = { id: "private-id", uploadId: "private-upload", contentHash: "a".repeat(64), canonicalKey: "doi:1", title: "Private title", features: { topic: ["private phrase"], object: [], method: [] }, publicIds: { openAlexId: "W123", semanticScholarId: "a".repeat(40) } };
 describe("public seed discovery", () => {
   it("sends only bounded verified identifiers, not private material", async () => {
     const citations = vi.fn().mockResolvedValue([]); const recommendations = vi.fn().mockResolvedValue([]);

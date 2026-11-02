@@ -17,6 +17,11 @@ describe("seed matching", () => {
     expect(strongestSeedMatches("Solid electrolytes in lithium oxide", [battery, { ...battery, id: "copy" }])).toHaveLength(1);
     expect(strongestSeedMatches("electrolyte-free computation", [battery])).toEqual([]);
   });
+  it("treats identical bytes with different identifiers as one seed", () => {
+    const first = { ...battery, contentHash: "a".repeat(64) };
+    const alias = { ...battery, id: "alias", canonicalKey: "doi:other", contentHash: first.contentHash };
+    expect(strongestSeedMatches("solid electrolyte lithium oxide", [first, alias])).toHaveLength(1);
+  });
   it("admits only grounded, sufficiently specific matches", () => {
     expect(admitsBySeed(matchSeed("A solid electrolyte improves transport", battery))).toBe(true);
     expect(admitsBySeed(matchSeed("Neutron diffraction measured crystals", battery))).toBe(false);

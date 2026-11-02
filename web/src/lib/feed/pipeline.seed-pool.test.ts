@@ -16,7 +16,7 @@ it("scores seed-only retrieved candidates through build and read without changin
   const cache = new MemoryCache();
   const legacy = await runFeedPipeline(req, { cache, now });
   expect(legacy.items.map((i) => i.id)).not.toContain("a");
-  const snapshot = { version: "v1", effectiveLocalDate: "2026-11-02", revocationGeneration: 0, seeds: [{ id: "seed", uploadId: "private", canonicalKey: "doi:test", title: "Private", features: { topic: ["forest canopy"], object: ["rainforest tree"], method: ["satellite imaging"] } }] };
+  const snapshot = { version: "v1", effectiveLocalDate: "2026-11-02", revocationGeneration: 0, seeds: [{ id: "seed", uploadId: "private", contentHash: "a".repeat(64), canonicalKey: "doi:test", title: "Private", features: { topic: ["forest canopy"], object: ["rainforest tree"], method: ["satellite imaging"] } }] };
   const options = { cache, now, seedSnapshot: snapshot, seedTargetLocalDate: "2026-11-02" };
   const seeded = await runFeedPipeline(req, options);
   expect(seeded.items.map((i) => i.id)).toContain("a");

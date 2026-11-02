@@ -2,7 +2,7 @@ import { tokenizeFolded } from "@/lib/scoring/tokenize";
 
 /** This shape describes only extracted matching facets, never PDF text. */
 export interface SeedFacets { topic: readonly string[]; object: readonly string[]; method: readonly string[] }
-export interface MatchingSeed { id: string; canonicalKey: string; features: SeedFacets }
+export interface MatchingSeed { id: string; canonicalKey: string; contentHash?: string; features: SeedFacets }
 export type SeedFacet = keyof SeedFacets;
 export interface FacetHit { facet: SeedFacet; phrase: string }
 export interface SeedMatch { seedId: string; canonicalKey: string; score: number; hits: FacetHit[] }
@@ -34,16 +34,23 @@ export function matchSeed(candidateText: string, seed: MatchingSeed): SeedMatch 
   return { seedId: seed.id, canonicalKey: seed.canonicalKey, score: clamp(score), hits };
 }
 
-/** Keep the strongest two distinct papers, never add duplicate copies' scores. */
-export function strongestSeedMatches(candidateText: string, seeds: readonly MatchingSeed[]): SeedMatch[] {
-  const distinct = new Map<string, SeedMatch>();
+/** Group exact-byte or canonical duplicates, including transitive aliases. */
+export function groupSeedCopies<T extends MatchingSeed>(seeds: readonly T[]): T[][] {
+  const groups: T[][] = [];
   for (const seed of seeds) {
     if (!seed.canonicalKey) continue;
-    const hit = matchSeed(candidateText, seed);
-    const previous = distinct.get(seed.canonicalKey);
-    if (!previous || hit.score > previous.score) distinct.set(seed.canonicalKey, hit);
+    const overlaps = groups.filter((group) => group.some((other) => other.canonicalKey === seed.canonicalKey || (!!seed.contentHash && other.contentHash === seed.contentHash)));
+    if (!overlaps.length) { groups.push([seed]); continue; }
+    const group = overlaps[0]; group.push(seed);
+    for (const merged of overlaps.slice(1)) { group.push(...merged); groups.splice(groups.indexOf(merged), 1); }
   }
-  return [...distinct.values()].filter((m) => m.score > 0).sort((a, b) => b.score - a.score).slice(0, 2);
+  return groups;
+}
+
+/** Keep the strongest two distinct papers, never add duplicate copies' scores. */
+export function strongestSeedMatches(candidateText: string, seeds: readonly MatchingSeed[]): SeedMatch[] {
+  return groupSeedCopies(seeds).map((group) => ({ ...group.map((seed) => matchSeed(candidateText, seed)).sort((a, b) => b.score - a.score)[0], canonicalKey: group[0].canonicalKey }))
+    .filter((m) => m.score > 0).sort((a, b) => b.score - a.score).slice(0, 2);
 }
 
 /** A generic method or object alone does not establish topical relevance. */

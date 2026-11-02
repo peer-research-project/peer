@@ -3,6 +3,7 @@ import { fetchSemanticScholarRecommendations } from "@/lib/sources/semantic-scho
 import { dedupItems } from "@/lib/feed/dedup";
 import type { RawItem } from "@/lib/sources/types";
 import type { SeedPaper } from "./types";
+import { groupSeedCopies } from "./scoring";
 
 interface PublicClients {
   citations(ids: string[]): Promise<RawItem[]>;
@@ -16,9 +17,7 @@ const clients: PublicClients = {
 /** Only verified public identifiers leave this process. No extracted feature,
  * seed title, upload identifier, or source text is passed to either client. */
 export async function discoverSeedNeighbors(seeds: readonly SeedPaper[], api: PublicClients = clients): Promise<RawItem[]> {
-  const unique = new Map<string, SeedPaper>();
-  for (const seed of seeds) if (seed.canonicalKey && !unique.has(seed.canonicalKey)) unique.set(seed.canonicalKey, seed);
-  const distinct = [...unique.values()].slice(0, 5);
+  const distinct = groupSeedCopies(seeds).map((group) => group.find((seed) => seed.publicIds?.openAlexId || seed.publicIds?.semanticScholarId) ?? group[0]).slice(0, 5);
   const oa = [...new Set(distinct.map((s) => s.publicIds?.openAlexId?.replace(/^https?:\/\/openalex\.org\//i, ""))
     .filter((id): id is string => !!id && /^W\d+$/i.test(id)))];
   const s2 = [...new Set(distinct.map((s) => s.publicIds?.semanticScholarId)
