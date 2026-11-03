@@ -13,9 +13,13 @@ import { NextRequest } from "next/server";
 const mocks = vi.hoisted(() => ({
   getUser: vi.fn(),
   acknowledgeBatch: vi.fn(),
+  getBatchById: vi.fn(),
+  resolveSeedPool: vi.fn(),
+  ackSeedBatch: vi.fn(),
   ledgerConstructor: vi.fn(),
 }));
 
+vi.mock("@/lib/seed-pool/server", () => ({ resolveSeedPool: mocks.resolveSeedPool, ackSeedBatch: mocks.ackSeedBatch }));
 vi.mock("@/lib/supabase/server", () => ({
   createClient: () =>
     Promise.resolve({
@@ -28,6 +32,7 @@ vi.mock("@/lib/dashboard/delivery-ledger", () => {
     constructor() {
       mocks.ledgerConstructor();
     }
+    getBatchById(...args: unknown[]) { return mocks.getBatchById(...args); }
     acknowledgeBatch(...args: unknown[]) {
       return mocks.acknowledgeBatch(...args);
     }
@@ -53,6 +58,7 @@ beforeEach(() => {
   vi.stubEnv("PEER_DASHBOARD_LEDGER", "on");
   mocks.getUser.mockResolvedValue({ data: { user: { id: "owner-1" } } });
   mocks.acknowledgeBatch.mockResolvedValue("acknowledged");
+  mocks.resolveSeedPool.mockResolvedValue({ status: "none", schemaInstalled: false, ownerLocalDate: null, timezone: null, snapshot: null, revision: 0, revocationGeneration: 0 });
 });
 
 afterEach(() => {
@@ -61,7 +67,7 @@ afterEach(() => {
 
 describe("POST /api/feed/ack", () => {
   describe("flag off", () => {
-    it("returns 404 not_enabled before touching auth or the ledger", async () => {
+    it("returns 404 not_enabled after detecting the absent seed schema, without touching the ledger", async () => {
       vi.stubEnv("PEER_DASHBOARD_LEDGER", "");
 
       const response = await POST(request({ batchId: VALID_BATCH_ID }));
@@ -69,7 +75,8 @@ describe("POST /api/feed/ack", () => {
       expect(response.status).toBe(404);
       await expect(response.json()).resolves.toEqual({ error: "not_enabled" });
       expect(response.headers.get("Cache-Control")).toBe("private, no-store");
-      expect(mocks.getUser).not.toHaveBeenCalled();
+      expect(mocks.getUser).toHaveBeenCalledTimes(1);
+      expect(mocks.resolveSeedPool).toHaveBeenCalledWith("owner-1");
       expect(mocks.ledgerConstructor).not.toHaveBeenCalled();
       expect(mocks.acknowledgeBatch).not.toHaveBeenCalled();
     });
@@ -242,4 +249,17 @@ describe("POST /api/feed/ack", () => {
       expect(response.headers.get("Cache-Control")).toBe("private, no-store");
     });
   });
+});
+
+
+it("uses the batch's actual date and rejects a revoked acknowledgment", async () => {
+  const resolved = { status: "none", schemaInstalled: true, ownerLocalDate: "2026-11-03", timezone: "America/Chicago", snapshot: null, revision: 2, revocationGeneration: 2 };
+  mocks.resolveSeedPool.mockResolvedValue(resolved);
+  mocks.getBatchById.mockResolvedValue({ id: VALID_BATCH_ID, ownerId: "owner-1", localDate: "2026-11-01", status: "served", seedPoolVersion: "old-v", seedRevocationGeneration: 1 });
+  mocks.ackSeedBatch.mockResolvedValue({ status: "stale_pool" });
+  const response = await POST(request({ batchId: VALID_BATCH_ID }));
+  expect(response.status).toBe(503);
+  expect(mocks.resolveSeedPool).toHaveBeenCalledWith("owner-1", { targetLocalDate: "2026-11-01" });
+  expect(mocks.ackSeedBatch).toHaveBeenCalledWith(expect.objectContaining({ localDate: "2026-11-01", expectedRevocationGeneration: 2 }));
+  expect(mocks.acknowledgeBatch).not.toHaveBeenCalled();
 });

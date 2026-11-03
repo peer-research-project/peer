@@ -134,6 +134,7 @@ export function rawItemToPaper(
     summaryExperimentKeywords: keywords,
     summaryResultDiscussion: discussion,
     tldr: cleanDisplayTextOrUndefined(item.tldr),
+    abstractRetrieval: item.metadata.abstractRetrieval,
     linkPaper,
     linkArxiv,
     doi: item.metadata?.doi

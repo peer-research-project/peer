@@ -34,7 +34,7 @@ describe("readingToMarkdown", () => {
         "# DiffKT: a diffusion model for fine-grained knowledge tracing\n\nDOI: 10.1007/s10489-026-07459-9\n\n",
       ),
     ).toBe(true);
-    expect(md).toContain("No abstract is published where Peer can read it — only the record.");
+    expect(md).toContain("Peer could not retrieve an abstract — only the record.");
     expect(md).not.toContain("## What they found");
     expect(md).not.toContain("## Not on this page");
     expect(md).not.toContain("```");

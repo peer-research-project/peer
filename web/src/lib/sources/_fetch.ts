@@ -17,15 +17,14 @@
 // NEW FINDING #1).
 export async function sourceFetch(
   url: string,
-  options: { timeoutMs?: number; revalidate?: number; headers?: Record<string, string> } = {},
+  options: { timeoutMs?: number; revalidate?: number; headers?: Record<string, string>; noStore?: boolean } = {},
 ): Promise<Response> {
   const timeoutMs = options.timeoutMs ?? 7000;
   const init: RequestInit & { next?: { revalidate?: number } } = {
     signal: AbortSignal.timeout(timeoutMs),
   };
-  if (options.revalidate !== undefined) {
-    init.next = { revalidate: options.revalidate };
-  }
+  if (options.noStore) init.cache = "no-store";
+  else if (options.revalidate !== undefined) init.next = { revalidate: options.revalidate };
   if (options.headers !== undefined) {
     init.headers = options.headers;
   }
@@ -42,9 +41,8 @@ export async function sourceFetch(
   const retryInit: RequestInit & { next?: { revalidate?: number } } = {
     signal: AbortSignal.timeout(timeoutMs),
   };
-  if (options.revalidate !== undefined) {
-    retryInit.next = { revalidate: options.revalidate };
-  }
+  if (options.noStore) retryInit.cache = "no-store";
+  else if (options.revalidate !== undefined) retryInit.next = { revalidate: options.revalidate };
   if (options.headers !== undefined) {
     retryInit.headers = options.headers;
   }

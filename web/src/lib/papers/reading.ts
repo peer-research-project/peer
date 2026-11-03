@@ -14,6 +14,7 @@
 // Decision block shows. Nothing else on the page hand-writes a status string.
 
 import type { Paper } from "@/types";
+import { fingerprintReadingSource } from "./reading-source";
 import type { ExtractedFigureCaption, ExtractedTable } from "./html-text";
 import type { ExtractedDocument } from "./html-text";
 import type { FullTextResult } from "./full-text";
@@ -100,7 +101,7 @@ export interface ReadingProvenance {
   abstractSentences: number;
   /** Semantic Scholar's TLDR — labelled as such on the page, never merged into the abstract. */
   tldr?: string;
-  fullText: "none" | "html" | "pdf" | "pdf_unreadable_here" | "pdf_empty" | "paywalled";
+  fullText: "none" | "html" | "pdf" | "pdf_unreadable_here" | "pdf_empty" | "paywalled" | "blocked";
   /** "arXiv HTML" | "Zenodo PDF" | "PMC" | "publisher page" … */
   sourceLabel?: string;
   /** PDFs only. */
@@ -108,6 +109,7 @@ export interface ReadingProvenance {
   /** Canonical buckets present, document order. */
   buckets: string[];
   paywallHost?: string;
+  blockedHost?: string;
 }
 
 export type ReadingSourceLabel =
@@ -155,7 +157,8 @@ export interface PaperReading {
    * 14 → 16: PDFs with narrow column gutters are re-extracted in reading order;
    * cached passages use the previous extraction and need to be refreshed.
    */
-  version: 18;
+  version: 19;
+  sourceFingerprint?: string;
   paperId: string;
   builtAt: string;
   provenance: ReadingProvenance;
@@ -503,13 +506,14 @@ function hostOf(url: string): string | undefined {
 
 /** The host that blocked the full text, from the attempt that hit the wall. */
 function paywallHostOf(fullText: FullTextResult): string | undefined {
-  const blocked = fullText.attempts.find((attempt) =>
+  const blocked = [...fullText.attempts].reverse().find((attempt) =>
     attempt.outcome.startsWith("paywalled"),
   );
-  if (blocked) return hostOf(blocked.link.url);
-  // `paywallReason` opens with the host when it knew one.
+  if (blocked?.finalUrl) return hostOf(blocked.finalUrl);
+  // Older results may have only the final host in the reason.
   const match = fullText.reason?.match(/^([\w.-]+\.[a-z]{2,}) requires\b/i);
-  return match?.[1];
+  if (match) return match[1].replace(/^www\./i, "");
+  return blocked ? hostOf(blocked.link.url) : undefined;
 }
 
 /**
@@ -573,6 +577,15 @@ function buildProvenance(
     base.fullText = "paywalled";
     const host = paywallHostOf(fullText);
     if (host) base.paywallHost = host;
+    return base;
+  }
+  const blocked = fullText.status === "source_unavailable" && fullText.attempts.find((attempt) =>
+    /^source_unavailable: .* blocked this request/i.test(attempt.outcome),
+  );
+  if (blocked) {
+    base.fullText = "blocked";
+    const finalUrl = (blocked as typeof blocked & { finalUrl?: string }).finalUrl;
+    base.blockedHost = hostOf(finalUrl ?? blocked.link.url);
     return base;
   }
   if (pdfUnreadableHere(fullText)) base.fullText = "pdf_unreadable_here";
@@ -811,7 +824,8 @@ export function buildReading(
   omitted.push({ block: "nextStep", reason: "needs_key" });
 
   return {
-    version: 18,
+    version: 19,
+    sourceFingerprint: fingerprintReadingSource(paper),
     paperId: paper.id,
     builtAt: now.toISOString(),
     provenance,
@@ -844,7 +858,7 @@ export function omittedForReader(
       return { ...entry, reason: "no_profile" };
     }
     if (
-      report?.basis === "model-abstract" &&
+      report?.basis === "model-abstract" && reading.provenance.abstract !== "none" &&
       (entry.block === "caveats" || entry.block === "nextStep")
     ) {
       return { ...entry, reason: "needs_full_text" };
@@ -900,9 +914,9 @@ function capitalize(text: string): string {
 }
 
 const NO_ABSTRACT =
-  "No abstract is published where Peer can read it — only the record. Open it at the source to judge it.";
+  "Peer could not retrieve an abstract — only the record. Open it at the source to judge it.";
 const NO_ABSTRACT_TLDR =
-  "No abstract is published where Peer can read it. The one-line TLDR above is Semantic Scholar's, not the authors'.";
+  "Peer could not retrieve an abstract. The one-line TLDR above is Semantic Scholar's, not the authors'.";
 const PROFILE_EMPTY =
   "Add your current project in Profile and Peer will relate this paper to it.";
 const MODEL_FAILED =
@@ -965,6 +979,11 @@ function readingSentence(reading: PaperReading, providerConfigured: boolean, key
   const sectionsRead = provenance.fullText === "html" || provenance.fullText === "pdf";
   const plain = (sentence: string): ReadingSentence => ({ sentence, asksForKey: false });
 
+  if (provenance.fullText === "blocked") {
+    const host = provenance.blockedHost ?? "The source";
+    const lead = provenance.abstract === "none" ? "No abstract is available. " : "Abstract only. ";
+    return plain(`${lead}${host} blocked this request, so Peer could not read the full paper.`);
+  }
   if (provenance.abstract === "none" && !sectionsRead) {
     return plain(provenance.tldr ? NO_ABSTRACT_TLDR : NO_ABSTRACT);
   }
@@ -983,7 +1002,7 @@ function readingSentence(reading: PaperReading, providerConfigured: boolean, key
         : " with no methods section";
     const lead =
       provenance.abstract === "none"
-        ? "No abstract is published where Peer can read it, but the full text was:"
+        ? "Peer could not retrieve an abstract, but the full text was:"
         : "Full text read:";
     return withKey(`${lead} ${sourcePhrase(provenance)}${qualifier}. ${presentSentence(reading)}`);
   }
@@ -1051,6 +1070,9 @@ function fullTextClause(reading: PaperReading, report: AvailabilityReport): stri
   if (!report.deepRequested) {
     return " Caveats and a next step need the full text — turn on deep reports in Profile.";
   }
+  if (provenance.fullText === "blocked") {
+    return ` Caveats and a next step need the full text; ${provenance.blockedHost ?? "the source"} blocked this request.`;
+  }
   if (provenance.fullText === "paywalled") {
     const host = provenance.paywallHost ?? "the publisher";
     return ` Caveats and a next step need the full text — ${host} keeps it behind access.`;
@@ -1069,7 +1091,9 @@ function fullTextClause(reading: PaperReading, report: AvailabilityReport): stri
 
 function modelSentence(reading: PaperReading, report: AvailabilityReport): string {
   let sentence: string;
-  if (report.basis === "model-abstract") {
+  if (report.basis === "model-abstract" && reading.provenance.abstract === "none") {
+    sentence = "The abstract is unavailable, so Peer cannot verify that this report was read from it.";
+  } else if (report.basis === "model-abstract") {
     sentence =
       "Read by your model from the abstract; every claim below carries a sentence from it.";
     if (reading.caveats.length === 0) sentence += fullTextClause(reading, report);

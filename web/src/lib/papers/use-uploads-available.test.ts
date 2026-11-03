@@ -3,8 +3,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import {
   availabilityFromResponse,
-  uploadsReady,
   useUploadsAvailable,
+  uploadsReady,
   type UploadsAvailability,
 } from "./use-uploads-available";
 
@@ -12,25 +12,9 @@ import {
 // anywhere mounts a live React effect (see private-pdf-status.test.tsx's own
 // note, and use-batch-acknowledgement.test.ts's SSR-safety block, which this
 // file follows). The two decisions that matter — what the fetch outcome
-// means, and whether a call site should render its upload button for a
-// given state — are both pure, exported predicates, tested exhaustively
-// below with no rendering at all. The hook itself only gets an SSR-safety
+// means is a pure, exported predicate, tested below. The hook itself only gets an SSR-safety
 // smoke test: `renderToStaticMarkup` never runs effects, so it proves the
 // hook doesn't throw and starts at "unknown", not that the real fetch works.
-
-describe("uploadsReady", () => {
-  it("is true only once the server has confirmed uploads are available", () => {
-    expect(uploadsReady("available")).toBe(true);
-  });
-
-  it("is false while the check is still unresolved — an entry point must not flash on and then disappear", () => {
-    expect(uploadsReady("unknown")).toBe(false);
-  });
-
-  it("is false once the server has confirmed uploads are unavailable", () => {
-    expect(uploadsReady("unavailable")).toBe(false);
-  });
-});
 
 describe("availabilityFromResponse", () => {
   it("is available only for a 2xx response with an explicit enabled: true", () => {
@@ -42,12 +26,12 @@ describe("availabilityFromResponse", () => {
   });
 
   it("is unavailable for a non-2xx response, even with a truthy body", () => {
-    expect(availabilityFromResponse(false, { enabled: true })).toBe("unavailable");
+    expect(availabilityFromResponse(false, { enabled: true })).toBe("error");
   });
 
   it("is unavailable when the body has no enabled field, or no body at all — never assumed available", () => {
-    expect(availabilityFromResponse(true, {})).toBe("unavailable");
-    expect(availabilityFromResponse(true, null)).toBe("unavailable");
+    expect(availabilityFromResponse(true, {})).toBe("error");
+    expect(availabilityFromResponse(true, null)).toBe("error");
   });
 });
 
@@ -73,4 +57,9 @@ describe("useUploadsAvailable — SSR safety", () => {
     const html = renderToStaticMarkup(createElement(Host, { enabled: false }));
     expect(html).toContain("unknown");
   });
+});
+
+
+it.each([ ["available", true], ["unknown", false], ["unavailable", false], ["error", false] ] as const)("transfer readiness: %s", (state, ready) => {
+  expect(uploadsReady(state)).toBe(ready);
 });

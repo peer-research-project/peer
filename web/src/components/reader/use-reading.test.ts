@@ -106,3 +106,13 @@ describe("useReading — private PDF reading cache (P0-02)", () => {
     expect(mount({ ...upload, revision: 2 })).toContain("miss:-");
   });
 });
+
+
+it("separates reading cache entries when the source changes", async () => {
+  const { fingerprintReadingSource } = await import("./use-reading");
+  const empty = { summaryIntro: "", summaryResultDiscussion: "" };
+  const enriched = { ...empty, summaryIntro: "A new abstract." };
+  expect(fingerprintReadingSource(enriched)).not.toBe(fingerprintReadingSource({ ...enriched, summaryIntro: "Changed abstract." }));
+  expect(buildReadingKey("paper", undefined, undefined, fingerprintReadingSource(empty)))
+    .not.toBe(buildReadingKey("paper", undefined, undefined, fingerprintReadingSource(enriched)));
+});

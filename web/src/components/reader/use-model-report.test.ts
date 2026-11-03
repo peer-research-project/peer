@@ -58,7 +58,7 @@ describe("buildReportKey", () => {
   it("is byte-identical to today's key without questions", () => {
     const paper = { id: "arxiv:2607.00001", fullTextUploadId: "upload:0123456789abcdef", revision: 2 };
     const today = buildReportKey(paper, "deep", "my project", "gemini");
-    expect(today).toBe(`arxiv:2607.00001|upload:0123456789abcdef|2|deep|${today.split("|")[4]}|gemini`);
+    expect(today).toBe(`arxiv:2607.00001|upload:0123456789abcdef|2|deep|${today.split("|")[4]}|gemini|source:1dj34wh`);
     expect(buildReportKey(paper, "deep", "my project", "gemini", [])).toBe(today);
     expect(buildReportKey(paper, "deep", "my project", "gemini", undefined)).toBe(today);
   });
@@ -207,4 +207,10 @@ describe("useModelReport — private PDF report cache (P0-02)", () => {
 
     expect(mount({ ...supplement, revision: 2 })).toContain("miss");
   });
+});
+
+
+it("changes report cache key when source text changes", () => {
+  const base = { id: "test", summaryIntro: "", summaryResultDiscussion: "" };
+  expect(buildReportKey(base, "abstract", "", "default")).not.toBe(buildReportKey({ ...base, summaryIntro: "A new abstract." }, "abstract", "", "default"));
 });

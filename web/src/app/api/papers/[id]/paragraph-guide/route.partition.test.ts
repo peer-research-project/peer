@@ -308,7 +308,7 @@ describe("POST /api/papers/[id]/paragraph-guide — Tier 0 and the owner's check
 
   it("is 410 and remembers nothing when the upload changed while the model worked, partition or not", async () => {
     const UPLOAD = "upload:0123456789abcdef";
-    mocks.ownedUpload.mockResolvedValueOnce({ revision: 3, paperIds: [UPLOAD] }).mockResolvedValueOnce({ revision: 4, paperIds: [UPLOAD] });
+    mocks.ownedUpload.mockResolvedValueOnce({ revision: 3, paperIds: [UPLOAD] }).mockResolvedValueOnce({ revision: 3, paperIds: [UPLOAD] }).mockResolvedValueOnce({ revision: 4, paperIds: [UPLOAD] });
     const response = await call(ask({ paper: { ...paper, id: UPLOAD } }), UPLOAD);
 
     expect(response.status).toBe(410);

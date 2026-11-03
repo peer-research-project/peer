@@ -5,6 +5,7 @@ import {
   createTrustedPaperCacheScope,
   isTrustedPaperCacheScope,
   PrivatePaperPoolCache,
+  SeedFencedPaperPoolCache,
 } from "./private-paper-cache";
 
 const pool: CachedPaperPool = {
@@ -88,4 +89,15 @@ describe("PrivatePaperPoolCache", () => {
     await cache.set("peer-pool-v6-papers-stale", pool);
     expect(fake.from).not.toHaveBeenCalled();
   });
+});
+
+
+it("fences a seeded private pool write by owner, target day, version and revocation", async () => {
+  const get = vi.fn().mockResolvedValue(null); const unsafeSet = vi.fn();
+  const put = vi.fn().mockResolvedValue({ status: "stale_pool" });
+  const fence = { ownerId: "owner", localDate: "2026-11-02", expectedVersion: "v2", expectedRevocationGeneration: 3 };
+  const cache = new SeedFencedPaperPoolCache({ get, set: unsafeSet }, fence, put);
+  await cache.set(`${PAPER_POOL_KEY_PREFIX}test`, pool);
+  expect(put).toHaveBeenCalledWith({ ...fence, scopeKey: `${PAPER_POOL_KEY_PREFIX}test`, payload: pool });
+  expect(unsafeSet).not.toHaveBeenCalled();
 });

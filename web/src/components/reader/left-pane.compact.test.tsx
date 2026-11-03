@@ -91,7 +91,8 @@ describe("the upload row is the details' in the three panes (decision-block.tsx)
     const made = page.match(/const uploadAction = [^;]*<UploadButton targetPaper=\{paper\} onUploaded=\{setUpload\} \/>[^;]*;/g) ?? [];
 
     expect(made).toHaveLength(1);
-    expect(made[0]).toContain('!paper.id.startsWith("upload:") && uploadsAvailable');
+    expect(made[0]).toContain('!paper.id.startsWith("upload:") ?');
+    expect(made[0]).not.toContain('uploadsAvailable');
     expect(page.match(/\buploadAction=\{uploadAction\}/g)).toHaveLength(2);
     expect(page).not.toMatch(/uploadAction=\{!paper\.id/);
   });

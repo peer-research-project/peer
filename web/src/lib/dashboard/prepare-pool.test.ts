@@ -10,13 +10,16 @@ import { createPrepareAheadBuildPool } from "./prepare-pool";
 const mocks = vi.hoisted(() => ({
   createAdminClient: vi.fn(),
   runFeedPipeline: vi.fn(),
+  resolveSeedPool: vi.fn(),
 }));
 
 vi.mock("@/lib/supabase/admin", () => ({
   createAdminClient: mocks.createAdminClient,
 }));
 vi.mock("@/lib/feed/pipeline", () => ({ runFeedPipeline: mocks.runFeedPipeline }));
+vi.mock("@/lib/seed-pool/server", () => ({ resolveSeedPool: mocks.resolveSeedPool }));
 
+mocks.resolveSeedPool.mockResolvedValue({ status: "none", schemaInstalled: false, ownerLocalDate: null, timezone: null, snapshot: null, revision: 0, revocationGeneration: 0 });
 afterEach(() => {
   vi.clearAllMocks();
 });
@@ -201,4 +204,16 @@ describe("createPrepareAheadBuildPool", () => {
     const outcome = await buildPool(JOB);
     expect(outcome).toEqual({ ok: false, error: "source outage" });
   });
+});
+
+
+it("builds the job's owner-local target date with its resolved snapshot and revocation fence", async () => {
+  const snapshot = { version: "future-v2", effectiveLocalDate: JOB.localDate, seeds: [], revocationGeneration: 3 };
+  mocks.resolveSeedPool.mockResolvedValueOnce({ status: "none", schemaInstalled: true, ownerLocalDate: "2026-09-23", timezone: "America/Chicago", snapshot, revision: 2, revocationGeneration: 3 });
+  mocks.runFeedPipeline.mockResolvedValueOnce({ items: [] });
+  const build = createPrepareAheadBuildPool({ admin: makeAdmin({}), ledger: makeLedger() });
+  const result = await build(JOB);
+  expect(result.ok).toBe(true);
+  expect(mocks.resolveSeedPool).toHaveBeenCalledWith(JOB.ownerId, expect.objectContaining({ targetLocalDate: JOB.localDate }));
+  expect(mocks.runFeedPipeline).toHaveBeenCalledWith(expect.objectContaining({ paperCacheScope: expect.objectContaining({ ownerId: JOB.ownerId }) }), expect.objectContaining({ seedSnapshot: snapshot, seedPoolVersion: "future-v2", seedRevocationGeneration: 3, seedTargetLocalDate: JOB.localDate }));
 });

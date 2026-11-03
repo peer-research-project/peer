@@ -16,12 +16,13 @@ const page = read("src/app/welcome/page.tsx");
 describe("the welcome wizard asks for no events or jobs", () => {
   // OWN-KEY lane 4: Account joined the list, first; the property pinned here
   // (no Data step, and the paper steps in their order) is unchanged.
-  it("has no Data step: Account then six steps, in order, none labelled Data", () => {
+  it("has no Data step and includes the optional seed step in order", () => {
     expect(STEP_META.map((step) => step.key)).toEqual([
       "account",
       "basics",
       "topics",
       "work",
+      "seed", // Optional seed papers; Jev and Data remain absent.
       "radar",
       "ai",
       "persona",
@@ -31,6 +32,7 @@ describe("the welcome wizard asks for no events or jobs", () => {
       "Basics",
       "Topics",
       "Work",
+      "Seed papers",
       "Radar",
       "AI",
       "Persona",

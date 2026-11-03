@@ -1,3 +1,9 @@
+// Existing cases exercise the explicitly schema-absent legacy path.
+vi.mock("@/lib/seed-pool/server", () => ({
+  resolveSeedPool: vi.fn().mockResolvedValue({ status: "none", schemaInstalled: false, ownerLocalDate: null, timezone: null, snapshot: null, revision: 0, revocationGeneration: 0 }),
+  putSeedPreparedBatch: vi.fn(), markSeedBatchServed: vi.fn(), recordSeedFeedServed: vi.fn(), claimSeedDigest: vi.fn(), validateSeedDigestSend: vi.fn(), persistSeedDigestEmailAttempt: vi.fn(),
+}));
+vi.mock("@/lib/seed-pool/digest-batch", () => ({ freezeSeedDigestItems: vi.fn() }));
 // P4-S7-IDEM (Round 3) -- ABC-JEV-INTEGRATION.md §4 "P4-S7-IDEM B complete"
 // ruling; design doc docs/jev-abc/P4-S7-IDEM-B-20260924T113658Z.md; C
 // checkpoint docs/jev-abc/P4-S7-IDEM-C-<UTC>.md. NEW file -- does not edit
@@ -22,6 +28,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { createHash } from "node:crypto";
 import { GET, digestIdempotencyKey } from "./route";
+import * as seedServer from "@/lib/seed-pool/server";
+import { freezeSeedDigestItems } from "@/lib/seed-pool/digest-batch";
 
 const mocks = vi.hoisted(() => ({
   createAdminClient: vi.fn(),
@@ -648,5 +656,39 @@ describe("GET /api/jobs/dispatch-digests -- P4-S7-IDEM Resend idempotency key + 
     ]) {
       expect(source).not.toContain(forbidden);
     }
+  });
+});
+
+
+describe("seeded direct digest", () => {
+  beforeEach(() => {
+    vi.clearAllMocks(); vi.stubEnv("CRON_SECRET", "test-secret"); vi.useFakeTimers(); vi.setSystemTime(new Date("2026-09-24T15:00:00Z"));
+    mocks.runFeedPipeline.mockResolvedValue({ items: [], meta: {} });
+    mocks.sendDigestEmail.mockResolvedValue({ sent: true });
+    const snapshot = { version: "v1", effectiveLocalDate: "2026-09-24", seeds: [], revocationGeneration: 2 };
+    vi.mocked(seedServer.resolveSeedPool).mockResolvedValue({ status: "none", schemaInstalled: true, ownerLocalDate: "2026-09-24", timezone: "UTC", snapshot, revision: 2, revocationGeneration: 2 });
+    vi.mocked(freezeSeedDigestItems).mockResolvedValue([]);
+    vi.mocked(seedServer.claimSeedDigest).mockResolvedValue({ status: "claimed", deliveryId: 555 });
+    vi.mocked(seedServer.persistSeedDigestEmailAttempt).mockResolvedValue({ status: "persisted" });
+    vi.mocked(seedServer.validateSeedDigestSend).mockResolvedValue({ status: "allowed" });
+    mocks.createAdminClient.mockReturnValue(makeAdminClient({ profiles: [profileRow()] }).client);
+  });
+  it("uses one owner-day snapshot and fences persistence and send", async () => {
+    const response = await GET(authedRequest());
+    expect(response.status).toBe(200);
+    expect(freezeSeedDigestItems).toHaveBeenCalledWith("user-1", expect.objectContaining({ version: "v1", localDate: "2026-09-24" }), []);
+    expect(seedServer.claimSeedDigest).toHaveBeenCalledWith(expect.objectContaining({ ownerId: "user-1", localDate: "2026-09-24", expectedVersion: "v1", expectedRevocationGeneration: 2 }));
+    expect(seedServer.persistSeedDigestEmailAttempt).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(seedServer.persistSeedDigestEmailAttempt).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(seedServer.validateSeedDigestSend).mock.invocationCallOrder[0]);
+    expect(vi.mocked(seedServer.validateSeedDigestSend).mock.invocationCallOrder[0]).toBeLessThan(mocks.sendDigestEmail.mock.invocationCallOrder[0]);
+  });
+  it("never sends when persistence or final revocation check fails", async () => {
+    vi.mocked(seedServer.persistSeedDigestEmailAttempt).mockResolvedValueOnce({ status: "stale_pool" });
+    await GET(authedRequest());
+    expect(mocks.sendDigestEmail).not.toHaveBeenCalled();
+    vi.mocked(seedServer.persistSeedDigestEmailAttempt).mockResolvedValue({ status: "persisted" });
+    vi.mocked(seedServer.validateSeedDigestSend).mockResolvedValue({ status: "stale_pool" });
+    await GET(authedRequest());
+    expect(mocks.sendDigestEmail).not.toHaveBeenCalled();
   });
 });

@@ -48,6 +48,7 @@ export interface PdfTextResult {
    * see 1-16.
    */
   status?: number;
+  finalUrl?: string;
   /**
    * 2-06, step (b) — uploads only: page 1's lines as printed, joined with
    * spaces, before any of them is set aside as the cover. The upload route
@@ -60,7 +61,7 @@ export interface PdfTextResult {
 
 async function downloadPdf(
   url: string,
-): Promise<{ bytes: Buffer; finalUrl: string } | { error: string; status?: number }> {
+): Promise<{ bytes: Buffer; finalUrl: string } | { error: string; status?: number; finalUrl?: string }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
@@ -78,7 +79,7 @@ async function downloadPdf(
     // reason *string* reached the caller, and "PDF fetch returned 403"
     // matches no paywall-phrase regex, so every hard-403 was reported as
     // plain "source unavailable".
-    if (!res.ok) return { error: `PDF fetch returned ${res.status}`, status: res.status };
+    if (!res.ok) return { error: `PDF fetch returned ${res.status}`, status: res.status, finalUrl: res.url || url };
 
     const lengthHeader = Number.parseInt(res.headers.get("content-length") ?? "", 10);
     if (Number.isFinite(lengthHeader) && lengthHeader > MAX_PDF_BYTES) {
@@ -89,7 +90,7 @@ async function downloadPdf(
     if (bytes.byteLength === 0) return { error: "PDF response was empty." };
     if (bytes.byteLength > MAX_PDF_BYTES) return { error: "PDF too large for safe extraction." };
     if (bytes.subarray(0, 5).toString("ascii") !== "%PDF-") {
-      return { error: "Response was not a PDF (likely a landing/paywall page)." };
+      return { error: "Response was not a PDF." };
     }
     return { bytes, finalUrl: res.url || url };
   } catch (err) {
@@ -108,7 +109,7 @@ const recentBytes = new Map<string, { bytes: Buffer; ts: number }>();
  * of them. Six at most, oldest out first — a few megabytes each, on a
  * function that also holds the text cache.
  */
-export async function getPdfBytes(url: string): Promise<{ bytes: Buffer } | { error: string; status?: number }> {
+export async function getPdfBytes(url: string): Promise<{ bytes: Buffer } | { error: string; status?: number; finalUrl?: string }> {
   const hit = recentBytes.get(url);
   if (hit && Date.now() - hit.ts < BYTES_TTL_MS) return { bytes: hit.bytes };
   const download = await downloadPdf(url);
@@ -282,7 +283,7 @@ export async function withFigureSizes(doc: ExtractedDocument, bytes: Uint8Array)
 export async function tryExtractPdfText(url: string): Promise<PdfTextResult> {
   const download = await getPdfBytes(url);
   if ("error" in download) {
-    return { ok: false, reason: download.error, status: download.status };
+    return { ok: false, reason: download.error, status: download.status, finalUrl: download.finalUrl };
   }
 
   try {
@@ -295,7 +296,7 @@ export async function tryExtractPdfText(url: string): Promise<PdfTextResult> {
     }
     return { ok: true, doc: await withFigureSizes(normalize(outline), download.bytes) };
   } catch (err) {
-    console.warn("[papers/pdf-text] read failed:", err);
+    console.warn("[papers/pdf-text] read failed:", err instanceof Error ? err.name : typeof err);
     return { ok: false, reason: String(err) };
   }
 }
@@ -338,7 +339,7 @@ export async function extractPdfTextFromBytes(bytes: Buffer): Promise<PdfTextRes
   } catch (err) {
     // The file is not a PDF pdf.js can open. Not a scan: say it failed. The
     // error names the problem, never the text.
-    console.warn("[papers/pdf-text] read failed:", err);
+    console.warn("[papers/pdf-text] read failed:", err instanceof Error ? err.name : typeof err);
     return { ok: false, reason: String(err) };
   }
 }

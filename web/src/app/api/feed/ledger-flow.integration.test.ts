@@ -1,3 +1,8 @@
+// These cases exercise the schema-absent legacy pipeline.
+vi.mock("@/lib/seed-pool/server", () => ({
+  resolveSeedPool: vi.fn().mockResolvedValue({ status: "none", schemaInstalled: false, ownerLocalDate: null, timezone: null, snapshot: null, revision: 0, revocationGeneration: 0 }),
+  putSeedPreparedBatch: vi.fn(), markSeedBatchServed: vi.fn(), recordSeedFeedServed: vi.fn(), ackSeedBatch: vi.fn(), putSeedPrivatePool: vi.fn(),
+}));
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
@@ -313,8 +318,8 @@ describe("dashboard ledger end-to-end: mint -> serve -> ack -> next-day exclusio
     expect(ackResponse.status).toBe(404);
     await expect(ackResponse.json()).resolves.toEqual({ error: "not_enabled" });
     expect(ledgerMocks.ctor).not.toHaveBeenCalled();
-    // The ack route gates the flag before auth — never even reaches getUser.
-    expect(mocks.getUser.mock.calls.length).toBe(getUserCallsBeforeAck);
+    // Ack checks the signed-in owner to discover whether seed-backed batches are enabled.
+    expect(mocks.getUser.mock.calls.length).toBe(getUserCallsBeforeAck + 1);
   });
 
   // P4-S5a-FIX (Round 3) — F-A-P4S5-03

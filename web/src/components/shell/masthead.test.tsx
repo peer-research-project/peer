@@ -169,7 +169,7 @@ describe("the navigation is grouped without divider lines", () => {
 describe("the phone's in-flow wordmark on the home page is a touch target where there is no hover (P9-52, N5)", () => {
   // The bar's wordmark link wears the registration corners (`group/mark`); the in-flow one is the link set in the display serif.
   const flowLink = (html: string) => open(html, "a", "font-display");
-  const flowWrapper = (html: string) => open(html, "div", "md:hidden");
+  const flowWrapper = (html: string) => open(html, "div", "px-6 pt-6");
 
   it("is at least 44 px tall where there is no hover, and is a block there so the 44 px is its own box", () => {
     pathname = "/";
@@ -231,5 +231,15 @@ describe("the masthead is opaque once the page is scrolled", () => {
     expect(header.some((c) => /backdrop|glass/.test(c))).toBe(false);
     expect(header).toContain("sticky");
     expect(header).toContain("top-0");
+  });
+});
+
+
+describe("global actions", () => {
+  it("renders upload and the notes collection on desktop and phone", () => {
+    const html = render();
+    expect(html.match(/upload pdf paper to deep read<\/button>/g)).toHaveLength(2);
+    expect(html.match(/href="\/saved#shelf-notes"/g)).toHaveLength(2);
+    expect(html).not.toContain(">Write</button>");
   });
 });

@@ -13,10 +13,13 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Paper } from "@/types";
 import { buildReading, type PaperReading } from "@/lib/papers/reading";
+import { fingerprintReadingSource } from "@/lib/papers/reading-source";
+import { recordReadingKey } from "@/lib/papers/reading-identity";
+export { fingerprintReadingSource } from "@/lib/papers/reading-source";
 
-const STORAGE_KEY = "peer-reading-v2";
+export const READING_CACHE_KEY = "peer-reading-v4";
 const MAX_ENTRIES = 40;
-const TTL_MS = 24 * 60 * 60 * 1000;
+export const READING_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 /** The shape both gates below accept. Typed from the document itself, so
  *  bumping `PaperReading["version"]` is the only edit a shape change needs.
  *
@@ -28,7 +31,7 @@ const TTL_MS = 24 * 60 * 60 * 1000;
  *  old full reading (P8-04). The version in the URL moves the cache's key with
  *  the bump, so an old body is never served to a newer client. The route
  *  ignores the parameter. */
-export const READING_VERSION: PaperReading["version"] = 18;
+export const READING_VERSION: PaperReading["version"] = 19;
 
 type ReadingCache = Record<string, { reading: PaperReading; ts: number }>;
 
@@ -40,12 +43,14 @@ type ReadingCache = Record<string, { reading: PaperReading; ts: number }>;
  * was built against. `undefined` for every paper without a private
  * attachment, so the key is unchanged for the vast majority of papers.
  */
+
 export function buildReadingKey(
   paperId: string | undefined,
   uploadId: string | undefined,
   revision: number | undefined,
+  sourceFingerprint = "",
 ): string {
-  return `${paperId ?? ""}|${uploadId ?? "public"}|${revision ?? ""}`;
+  return `${paperId ?? ""}|${uploadId ?? "public"}|${revision ?? ""}${sourceFingerprint ? `|source:${sourceFingerprint}` : ""}`;
 }
 
 // Every touch of localStorage is wrapped: a private window, a full quota or
@@ -53,7 +58,7 @@ export function buildReadingKey(
 function readCache(): ReadingCache {
   if (typeof window === "undefined") return {};
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(READING_CACHE_KEY);
     if (!raw) return {};
     const parsed: unknown = JSON.parse(raw);
     return parsed && typeof parsed === "object" ? (parsed as ReadingCache) : {};
@@ -65,7 +70,7 @@ function readCache(): ReadingCache {
 export function readCached(key: string): PaperReading | null {
   const entry = readCache()[key];
   if (!entry?.reading || entry.reading.version !== READING_VERSION) return null;
-  if (Date.now() - (entry.ts ?? 0) >= TTL_MS) return null;
+  if (Date.now() - (entry.ts ?? 0) >= READING_CACHE_TTL_MS) return null;
   return entry.reading;
 }
 
@@ -85,7 +90,7 @@ function writeCached(key: string, reading: PaperReading): void {
         .sort((a, b) => (b[1].ts ?? 0) - (a[1].ts ?? 0))
         .slice(0, MAX_ENTRIES),
     );
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(pruned));
+    localStorage.setItem(READING_CACHE_KEY, JSON.stringify(pruned));
   } catch {
     // The reading is already on screen; the cache is a convenience.
   }
@@ -112,7 +117,13 @@ export function useReading(paper: Paper | undefined): {
   }, []);
   const uploadId = paper?.fullTextUploadId;
   const privatePdf = !!uploadId || !!paperId?.startsWith("upload:");
-  const readingKey = buildReadingKey(paperId, uploadId, paper?.revision);
+  const sourceFingerprint = paper ? fingerprintReadingSource(paper) : "";
+  const readingKey = buildReadingKey(paperId, uploadId, paper?.revision, sourceFingerprint);
+
+  useEffect(() => {
+    if (!paperId) return;
+    try { recordReadingKey(paperId, readingKey, localStorage); } catch { /* storage unavailable */ }
+  }, [paperId, readingKey]);
 
   // Synchronous and complete: the page the reader sees before any request.
   const reading0 = useMemo(() => (paper ? buildReading(paper, null) : null), [paper]);
@@ -124,7 +135,10 @@ export function useReading(paper: Paper | undefined): {
   // P0-02 (spec D0): keyed by `readingKey`, which names the upload and its
   // revision, so a private PDF's reading is cached too — under its own key,
   // never the public paper's — instead of being read again on every open.
-  const cached = useMemo(() => (paperId ? readCached(readingKey) : null), [paperId, readingKey]);
+  const cached = useMemo(() => {
+    const value = paperId ? readCached(readingKey) : null;
+    return value?.sourceFingerprint === sourceFingerprint ? value : null;
+  }, [paperId, readingKey, sourceFingerprint]);
 
   const [fetched, setFetched] = useState<Fetched | null>(null);
 
@@ -139,13 +153,13 @@ export function useReading(paper: Paper | undefined): {
       if (controller.signal.aborted) return;
       try {
         // `v` first, so a private request keeps its `upload` parameter after it.
-        const res = await fetch(`/api/papers/${encodeURIComponent(paperId)}/reading?v=${READING_VERSION}${uploadId ? `&upload=${encodeURIComponent(uploadId)}` : ""}`, {
+        const res = await fetch(`/api/papers/${encodeURIComponent(paperId)}/reading?v=${READING_VERSION}&sf=1${sourceFingerprint ? `&source=${sourceFingerprint}` : ""}${uploadId ? `&upload=${encodeURIComponent(uploadId)}` : ""}`, {
           signal: controller.signal,
         });
         if (!res.ok) throw new Error(`reading HTTP ${res.status}`);
         const reading = (await res.json()) as PaperReading;
         if (controller.signal.aborted) return;
-        if (reading?.version !== READING_VERSION) throw new Error("reading: unexpected shape");
+        if (reading?.version !== READING_VERSION || reading.sourceFingerprint !== sourceFingerprint) throw new Error("reading: source mismatch");
         // The route answers `no-store` when the full-text attempt timed out —
         // that reading is the abstract alone, and keeping it for a day would
         // hide the sections the next request gets. Follow the server's own
@@ -164,7 +178,7 @@ export function useReading(paper: Paper | undefined): {
       }
     })();
     return () => controller.abort();
-  }, [paperId, cached, uploadId, privatePdf, readingKey]);
+  }, [paperId, cached, uploadId, privatePdf, readingKey, sourceFingerprint]);
 
   const server = fetched && fetched.id === readingKey ? fetched.reading : null;
   const reading = server ?? cached ?? reading0;

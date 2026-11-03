@@ -135,12 +135,11 @@ import { explanationFor, passageHash, useExplainThreadsStore, type ExplainTurn }
 import { paragraphKey, usePlainRewritesStore } from "@/store/plain-rewrites";
 import { PLAIN_DEFAULT_LEVEL, PLAIN_REWRITE_ENABLED, isPlainLevel, type PlainLevel } from "@/lib/papers/plain-levels";
 import { exampleQuestions } from "@/lib/reader/question-examples";
-import { deepReportRequested, useModelReport } from "@/components/reader/use-model-report";
+import { deepReportRequested, reportForReading, useModelReport } from "@/components/reader/use-model-report";
 import { usePrivateSupplement } from "@/components/reader/use-private-supplement";
 import { PrivatePdfStatus } from "@/components/reader/private-pdf-status";
 import { UploadButton } from "@/components/briefing/upload-button";
 import { useAuthUser } from "@/components/account/use-auth-user";
-import { useUploadsAvailable, uploadsReady } from "@/lib/papers/use-uploads-available";
 import {
   BODY,
   NOT_FOUND,
@@ -571,7 +570,7 @@ export default function PaperReadingPage({
     apiFetch<Paper>(
       isUploadId
         ? `/api/papers/upload/${encodeURIComponent(id.slice("upload:".length))}`
-        : `/api/papers/${encodeURIComponent(id)}`,
+        : `/api/papers/${encodeURIComponent(id)}?sourceVersion=2`,
       controller ? { signal: controller.signal } : undefined,
     )
       .then((p) => {
@@ -684,7 +683,6 @@ function Reader({
   // existing saved upload's own view/delete actions (those never call
   // `hostedUploadsEnabled()`). Skipped entirely on an upload's own page,
   // where that entry point never renders anyway (see `uploadAction` below).
-  const uploadsAvailable = uploadsReady(useUploadsAvailable(!originalPaper.id.startsWith("upload:")));
   const profile = useProfileStore((s) => s.profile);
   const feedPapers = useFeedStore((s) => s.papers);
   const markRead = useFeedStore((s) => s.markRead);
@@ -746,7 +744,7 @@ function Reader({
   // holds — here, in the browser, from the `items` the page last read (P7-13:
   // up to 250 ms behind the typing).
   const tier0Route = useMemo(() => readingRoute(reading, asked), [reading, asked]);
-  const report = model.report;
+  const report = reportForReading(model.report, reading);
   // P2-04: all route consumers receive this one display route. Tier 0 still
   // stands unchanged if there is no verified report/question overlay. P2-04b:
   // the map and the body both take it as a `DrawRoute`
@@ -1409,7 +1407,7 @@ function Reader({
 
   // P11-20 follow-up (ruling §1h.120): one element, two places — the commands' last row in one column, the details' head in the three panes
   // (`decision-block.tsx` draws it where the window says).
-  const uploadAction = !paper.id.startsWith("upload:") && uploadsAvailable ? <UploadButton targetPaper={paper} onUploaded={setUpload} /> : undefined;
+  const uploadAction = !paper.id.startsWith("upload:") ? <UploadButton targetPaper={paper} onUploaded={setUpload} /> : undefined;
 
   return (
     // `tabIndex={-1}`: Next's layout router focuses the segment's first
@@ -1557,7 +1555,7 @@ function Reader({
             {!hasBody && reading.abstract.sentences.length === 0 && !report?.skim?.length && (
               <div className="border-l-2 border-accent pl-4 py-1">
                 <h2 className="text-title font-medium text-heading">No abstract available</h2>
-                <p className="mt-2 max-w-[48ch] text-body leading-relaxed text-text-muted">Peer could not find an abstract for this paper. Open the source to read the original record.</p>
+                <p className="mt-2 max-w-[48ch] text-body leading-relaxed text-text-muted">{paper?.abstractRetrieval?.status === "blocked" ? (paper.abstractRetrieval.attempts.some((attempt) => attempt.httpStatus === 451) ? "A source restricted access for legal reasons. Open the source to read the original record." : paper.abstractRetrieval.attempts.some((attempt) => attempt.httpStatus === 401) ? "A source requires authentication to retrieve the abstract. Open the source to read the original record." : "A source blocked the abstract request. Open the source to read the original record.") : paper?.abstractRetrieval?.status === "transient" ? "Abstract retrieval was temporarily unavailable. Try again later or open the source." : "Peer could not retrieve an abstract for this paper. Open the source to read the original record."}</p>
               </div>
             )}
             <PaperWords

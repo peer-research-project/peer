@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { tryPdfCandidates } from "./pdf-extract";
 
-describe("tryPdfCandidates — 1-22b, a hard 401/402/403/451 is reported as paywalled", () => {
+describe("tryPdfCandidates — 1-22b, hard access statuses are classified by evidence", () => {
   const originalFetch = globalThis.fetch;
 
   afterEach(() => {
@@ -9,7 +9,7 @@ describe("tryPdfCandidates — 1-22b, a hard 401/402/403/451 is reported as payw
     vi.restoreAllMocks();
   });
 
-  it("reports a hard-403 response as paywalled, not source_unavailable", async () => {
+  it("reports a hard-403 response as blocked", async () => {
     globalThis.fetch = vi.fn(async () => new Response("", { status: 403 })) as unknown as typeof fetch;
 
     const result = await tryPdfCandidates(
@@ -17,7 +17,7 @@ describe("tryPdfCandidates — 1-22b, a hard 401/402/403/451 is reported as payw
       "publisher",
     );
 
-    expect(result.status).toBe("paywalled");
+    expect(result.status).toBe("source_unavailable");
     expect(result.reason).toContain("onlinelibrary.wiley.com");
   });
 

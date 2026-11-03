@@ -22,6 +22,7 @@ import { readHighlight } from "@/lib/notes/blocks";
 import { highlightColour, highlightPaint, isHighlightColour } from "@/lib/notes/highlight-colours";
 import type { Block, BlockType, HighlightColourId, HighlightSpot } from "@/lib/notes/types";
 import { useLostPassages } from "@/store/notes";
+import { READING_IDENTITY_EVENT } from "@/lib/papers/reading-identity";
 import { HighlightSwatches } from "./highlight-strip";
 import "./highlight-row.css";
 import { PASSAGE_LOST_LINE, SQUARE_PX, goToPassage, passageIsLost, storedBodyOf, type HighlightGoal } from "./note-tags";
@@ -58,7 +59,8 @@ export function highlightIsLost(
 
 const subscribeToStorage = (onChange: () => void) => {
   window.addEventListener("storage", onChange);
-  return () => window.removeEventListener("storage", onChange);
+  window.addEventListener(READING_IDENTITY_EVENT, onChange);
+  return () => { window.removeEventListener("storage", onChange); window.removeEventListener(READING_IDENTITY_EVENT, onChange); };
 };
 
 /** `highlightIsLost` for a row: told by the reading page, or found in the stored body; never on the server's render or the first one. */

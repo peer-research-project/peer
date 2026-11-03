@@ -92,7 +92,7 @@ describe("GET /api/papers/[id]/reading", () => {
     // (section ids and the reading map). P8-04: 6 -> 7 (the extractors'
     // sections and buckets changed; see reading.test.ts's note).
     // P9: 7 -> 8 (the PDF text and the cleaner changed: P9-08 / P9-09 / P9-10).
-    expect(body.version).toBe(18);
+    expect(body.version).toBe(19);
     expect(body.paperId).toBe("openalex:W7208807247");
     expect(body.provenance.fullText).toBe("pdf");
     expect(body.provenance.pageCount).toBe(5);
@@ -110,6 +110,13 @@ describe("GET /api/papers/[id]/reading", () => {
       arxivId: null,
       openAlexId: "W7208807247",
     });
+  });
+
+  it.each(["transient", "blocked"] as const)("does not cache an abstract retrieval %s", async (status) => {
+    mocks.fetchPaperById.mockResolvedValue({ ...zenodoItem, abstract: undefined, metadata: { ...zenodoItem.metadata, abstractRetrieval: { status, attempts: [] } } });
+    mocks.getFullText.mockResolvedValue(zenodoFullText);
+    const res = await call("openalex:W7208807247");
+    expect(res.headers.get("cache-control")).toBe("no-store");
   });
 
   it("caches a settled no-full-text outcome too — it is a fact about the paper", async () => {

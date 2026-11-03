@@ -978,15 +978,10 @@ function blockedReason(url: string): string {
 
 function appearsPaywalled(url: string, html: string): boolean {
   if (hostLooksOpenAccess(url)) return false;
-  if (/captcha/i.test(html)) return true;
   const lowered = html.toLowerCase();
   const phrases = [
     "purchase access",
     "buy this article",
-    "access through your institution",
-    "institutional access",
-    "sign in to access",
-    "log in to access",
     "subscribe to continue",
     "subscription required",
     "preview of subscription content",
@@ -1013,9 +1008,9 @@ export async function tryHtmlCandidates(
     // call site's narrower `hostLooksOpenAccess` guard (still used below by
     // the phrase-based `appearsPaywalled`, unrelated to this check).
     if (res) {
-      const verdict = classifyHardAccessStatus(url, res.status);
-      if (verdict === "paywalled") return { status: "paywalled", candidates: [], reason: paywallReason(url) };
-      if (verdict === "blocked") return { status: "source_unavailable", candidates: [], reason: blockedReason(url) };
+      const verdict = classifyHardAccessStatus(res.url || url, res.status);
+      if (verdict === "paywalled") return { status: "paywalled", candidates: [], reason: paywallReason(res.url || url) };
+      if (verdict === "blocked") return { status: "source_unavailable", candidates: [], reason: blockedReason(res.url || url) };
     }
     return {
       status: "source_unavailable",
@@ -1039,6 +1034,7 @@ export async function tryHtmlCandidates(
 
   let finalUrl = res.url || url;
   let html = await readBoundedText(res);
+  if (/captcha/i.test(html)) return { status: "source_unavailable", candidates: [], reason: blockedReason(finalUrl) };
   if (appearsPaywalled(finalUrl, html)) {
     return {
       status: "paywalled",

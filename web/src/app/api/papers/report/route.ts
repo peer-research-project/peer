@@ -227,6 +227,7 @@ async function generateShallowReport(
   body: ExtendedRequest,
   override: ProviderOverrideConfig | undefined,
 ): Promise<PaperReport> {
+  if (!fullAbstract(body.paper).trim()) return emptyReport("fallback");
   const provider = resolveProvider(override ?? null);
   if (!provider?.generateJsonText) return emptyReport("fallback");
   try {
@@ -459,7 +460,7 @@ function streamReport(
             ...shallow,
             paywallNotice:
               fullText.reason ??
-              "Peer could not find a legal full-text source for this paper. Showing an abstract-only report instead.",
+              (shallow.noLlm ? "Peer could not find a readable full-text source or generate a report." : "Peer could not find a legal full-text source for this paper. Showing an abstract-only report instead."),
           });
           return;
         }
@@ -499,7 +500,7 @@ function streamReport(
           finish({
             ...shallow,
             paywallNotice:
-              "Peer downloaded the paper but the deep-read step failed. Showing an abstract-only report instead.",
+              (shallow.noLlm ? "Peer downloaded the paper but the deep-read step failed; no report was generated." : "Peer downloaded the paper but the deep-read step failed. Showing an abstract-only report instead."),
           });
           return;
         }
@@ -657,7 +658,7 @@ async function handlePost(req: NextRequest) {
           ...shallow,
           paywallNotice:
             fullText.reason ??
-            "Peer could not find a legal full-text source for this paper. Showing an abstract-only report instead.",
+            (shallow.noLlm ? "Peer could not find a readable full-text source or generate a report." : "Peer could not find a legal full-text source for this paper. Showing an abstract-only report instead."),
         });
       }
 
@@ -690,7 +691,7 @@ async function handlePost(req: NextRequest) {
         return NextResponse.json({
           ...shallow,
           paywallNotice:
-            "Peer downloaded the paper but the deep-read step failed. Showing an abstract-only report instead.",
+            (shallow.noLlm ? "Peer downloaded the paper but the deep-read step failed; no report was generated." : "Peer downloaded the paper but the deep-read step failed. Showing an abstract-only report instead."),
         });
       }
 

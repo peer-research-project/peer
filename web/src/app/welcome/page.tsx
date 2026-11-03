@@ -45,6 +45,7 @@ import {
 } from "@/components/profile/ai-setup";
 import { SchoolAutocomplete } from "@/components/profile/school-autocomplete";
 import { AdvisorField } from "@/components/profile/advisor-field";
+import { SeedPool } from "@/components/seed-pool/seed-pool";
 import { JevSetup } from "@/components/profile/jev-setup";
 import { useProfileSettled } from "@/components/first-run";
 import { Callout } from "@/components/ui";
@@ -76,6 +77,7 @@ const STEP_STORY: Record<StepKey, string> = {
   basics: "A little more you.\nA lot less noise.",
   topics: "Follow what\nmakes you curious.",
   work: "Make space for\nyour big questions.",
+  seed: "Papers that\ninspire you.",
   radar: "Your field,\nyour way.",
   ai: "A little help\nwhen you need it.",
   persona: "Every curious mind\nis different.",
@@ -131,6 +133,7 @@ export default function WelcomePage() {
   // never re-fires while the user is typing or when a remote sync lands
   // mid-session.
   const [manualStep, setManualStep] = useState<number | null>(null);
+  const [seedProgress, setSeedProgress] = useState({ busy: false, dirty: false });
   const [topicDraft, setTopicDraft] = useState("");
   const [autoStart, setAutoStart] = useState<number | null>(null);
   if (settled && autoStart === null) {
@@ -153,7 +156,8 @@ export default function WelcomePage() {
   // Topics is the one gate: the feed needs at least one required topic to
   // build a real first briefing.
   const topicsSatisfied = profile.researchTopics.length > 0;
-  const canContinue = key === "topics" ? topicsSatisfied || !!topicDraft.trim() : true;
+  const seedBlocked = key === "seed" && (seedProgress.busy || seedProgress.dirty);
+  const canContinue = key === "topics" ? topicsSatisfied || !!topicDraft.trim() : !seedBlocked;
 
   // Live done-map: ticks update as the user types, and when a synced profile
   // lands mid-wizard old data ticks steps instead of silently pre-filling.
@@ -170,7 +174,7 @@ export default function WelcomePage() {
 
   // Jumping is free among the first steps and everywhere once the topics
   // gate is satisfied — the rail never routes around the one requirement.
-  const canJumpTo = (i: number) => i <= topicsIdx || topicsSatisfied;
+  const canJumpTo = (i: number) => !seedBlocked && (i <= topicsIdx || topicsSatisfied);
 
   // Base navigation on the computed `step` — the functional-updater form
   // would see `manualStep`, which stays null until the first manual move.
@@ -183,10 +187,12 @@ export default function WelcomePage() {
     setTopicDraft("");
   };
   const next = () => {
+    if (!canContinue) return;
     if (key === "topics" && topicDraft.trim()) addTopic(topicDraft);
     if (step !== null) setManualStep(Math.min(step + 1, total - 1));
   };
   const back = () => {
+    if (seedBlocked) return;
     if (step !== null) setManualStep(Math.max(step - 1, 0));
   };
 
@@ -274,6 +280,7 @@ export default function WelcomePage() {
           <button
             type="button"
             onClick={skipEverything}
+            disabled={seedBlocked}
             className="welcome-skip"
           >
             Skip setup <span aria-hidden>↗</span>
@@ -399,6 +406,14 @@ export default function WelcomePage() {
                       </div>
                     </Field>
                   </div>
+                </StepFrame>
+              )}
+
+              {key === "seed" && (
+                <StepFrame kicker="Optional" title="Choose seed papers" subtitle="A few papers can help shape your briefing.">
+                  <SeedPool onboarding onProgress={setSeedProgress} />
+                  {seedBlocked && <p role="status">{seedProgress.busy ? "Wait for the PDFs to finish processing." : "Save your pool to continue, or skip and discard these unsaved changes."}</p>}
+                  <button type="button" disabled={seedProgress.busy} onClick={() => { setSeedProgress({ busy: false, dirty: false }); if (step !== null) setManualStep(Math.min(step + 1, total - 1)); }} className="mt-4 underline">Skip seed papers{seedProgress.dirty ? " and discard unsaved changes" : ""}</button>
                 </StepFrame>
               )}
 
@@ -551,7 +566,7 @@ export default function WelcomePage() {
               <button
                 type="button"
                 onClick={back}
-                disabled={step === 0}
+                disabled={step === 0 || seedBlocked}
                 className={cn(
                   buttonVariants({ tone: "ghost", size: "md" }),
                   "disabled:opacity-35 disabled:cursor-default",
@@ -710,6 +725,8 @@ function summarizeStep(
       ].filter(Boolean);
       return parts.length > 0 ? parts.join(" · ") : "Not filled in";
     }
+    case "seed":
+      return "Optional — manage in Profile";
     case "radar":
       return isStepDone("radar", profile, false) ? "Customized" : "Defaults";
     case "ai":

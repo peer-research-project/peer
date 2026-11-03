@@ -433,23 +433,26 @@ describe("UploadRetryEmpty (§1bi.8b)", () => {
   });
 });
 
-// UPLOAD-404 (§1bi.2): the home page and this page both gate their
-// `<UploadButton />` on the availability check — proved at the predicate
-// level in use-uploads-available.test.ts. This is the wiring-stays-wired
-// guard for THIS file's own call site, the same technique page.test.tsx
-// already uses for its "ReadingStrip call site keeps its width classes"
-// check, since this repo has no harness to render the whole effectful page.
-describe("page.tsx source — uploadAction call site stays gated on uploadsAvailable (§1bi.2)", () => {
-  // Re-aimed (P11-20 follow-up, ruling §1h.120, §1c): the element is made once (`const uploadAction = …`), gated on `uploadsAvailable` where it is made, and
-  // handed to the two places that draw it (the commands in one column, the details in the panes); so the gate is checked at the one place it stands, and
-  // both call sites are checked to hand over that element and not their own ungated one.
-  it("passes uploadsAvailable at the uploadAction call site", async () => {
+// The paper-specific upload remains visible regardless of availability.
+describe("page.tsx source — uploadAction stays visible", () => {
+  it("passes the same ungated upload action to both layouts", async () => {
     const { readFileSync } = await import("node:fs");
     const source = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
     const start = source.indexOf("const uploadAction =");
     expect(start).toBeGreaterThan(-1);
     const madeAt = source.slice(start, source.indexOf("\n", start));
-    expect(madeAt).toContain("uploadsAvailable");
+    // Parse the condition, so e.g. `false && !paper.id...` cannot pass.
+    const ts = await import("typescript");
+    const file = ts.createSourceFile("action.tsx", madeAt, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+    const statement = file.statements[0];
+    expect(ts.isVariableStatement(statement)).toBe(true);
+    if (!ts.isVariableStatement(statement)) throw new Error("expected action declaration");
+    const init = statement.declarationList.declarations[0].initializer;
+    expect(init && ts.isConditionalExpression(init)).toBe(true);
+    if (!init || !ts.isConditionalExpression(init)) throw new Error("expected action condition");
+    expect(init.condition.getText(file)).toBe('!paper.id.startsWith("upload:")');
+    expect(init.whenTrue.getText(file)).toContain("<UploadButton targetPaper={paper}");
+    expect(madeAt).not.toContain("uploadsAvailable");
     expect(source.match(/uploadAction=\{uploadAction\}/g)).toHaveLength(2);
     expect(source.match(/uploadAction=\{/g)).toHaveLength(2);
   });

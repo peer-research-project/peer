@@ -346,6 +346,20 @@ export function verifyReportEvidence(
     },
   };
 
+  // Free prose has no evidence field of its own. Retain it only when the
+  // text itself is present in the source; unrelated claims cannot verify it.
+  if (!locateEntry(report.whatItProposes.summary, entries)) {
+    verified.whatItProposes.summary = verified.whatItProposes.methods[0]?.evidence ?? "";
+  }
+  if (report.whatItProposes.newHere) {
+    const supported = report.whatItProposes.newHere.filter((text) => locateEntry(text, entries));
+    if (supported.length) verified.whatItProposes.newHere = supported;
+    else delete verified.whatItProposes.newHere;
+  }
+  if (!locateEntry(report.resultsAndSignificance.summary, entries)) {
+    verified.resultsAndSignificance.summary = verified.resultsAndSignificance.keyResults[0]?.evidence ?? "";
+  }
+
   if (report.limitations) verified.limitations = keepAll(report.limitations);
 
   if (report.relationToYourWork) {
