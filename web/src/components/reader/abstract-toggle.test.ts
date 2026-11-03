@@ -20,7 +20,7 @@ describe("AbstractToggle", () => {
 
   it("can show the abstract immediately when it is the primary reading content", () => {
     const html = renderToStaticMarkup(
-      createElement(AbstractToggle, { defaultOpen: true, children: createElement("p", null, "paper abstract") }),
+      createElement(AbstractToggle, { defaultOpen: true }, createElement("p", null, "paper abstract")),
     );
     expect(html).toContain('aria-expanded="true"');
     expect(html).toContain('id="abstract-panel"');
