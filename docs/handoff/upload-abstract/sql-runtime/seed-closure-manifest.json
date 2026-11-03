@@ -1,0 +1,32 @@
+{
+  "commit": "93673ab4824e2fd6c6720ab770c047f6577e1eb4",
+  "newline": "LF",
+  "sources": [
+    {
+      "path": "web/supabase/migrations/20260924000000_dashboard_delivery_ledger.sql",
+      "git_blob_lf_sha256": "72B08BE01E05E2AB3EF9DE0520B6E3E4B744A5FE81A0812C3FB5A40D8E81E905",
+      "windows_worktree_sha256": "1402A509DCA3C937014A56068F0050B7D284DE5055B75FA8172998A86F80917E",
+      "git_blob": "9447fd0dc0c927cfec6bfe4d3d69bc1df05372db"
+    },
+    {
+      "path": "web/supabase/migrations/20260924000300_briefing_deliveries_dedupe.sql",
+      "git_blob_lf_sha256": "66B9746A872D9C0C2E00D5D1A1B683F00138899C453EED2AAE462892CAC1E4AF",
+      "windows_worktree_sha256": "4BB00F10708258EF84B3C0771C7E5B8C842A9F7F969096DB8BA91F83B350E032",
+      "git_blob": "e039b1b803176d56536b7c54f791ec2904fce3ee"
+    },
+    {
+      "path": "web/supabase/migrations/20260924000500_dashboard_rollover.sql",
+      "git_blob_lf_sha256": "611DB4B4AF3EF78FA68822F4A0093AB4BDE5C3782488C9DB6824E6D0BCA3ED16",
+      "windows_worktree_sha256": "0B8691B8455ACC9FA93C81DCC2115F2888A894D633D9642EB0F7A0ADF0373A2E",
+      "git_blob": "2588751af9e37b4c0dff9815a5ce526121c8c98c"
+    },
+    {
+      "path": "web/supabase/migrations/20261102000000_seed_pool.sql",
+      "git_blob_lf_sha256": "B7AC3E004C2D9E144BF2F131E6ADB7AC841738FCC73B2710252F30DBAA5FBB4C",
+      "windows_worktree_sha256": "1DF1C5C65BF78B5F827069D9C96203373255BB4EA7B88FAFBB64E0B84E20F30D",
+      "git_blob": "670f990f179c50775fa5f1c08e4cec702fede828"
+    }
+  ],
+  "bundle_sha256": "F1D16D710C9B451CE90F5F3254B80DFE9D0A566779EC2485C51207BAEAC5745A",
+  "bundle_bytes": 63045
+}
