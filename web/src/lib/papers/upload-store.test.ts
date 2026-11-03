@@ -1,8 +1,14 @@
 import { existsSync } from "node:fs";
 import { readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
+
+// Observe the requested file mode on every platform; Windows stat does not expose POSIX permissions.
+vi.mock("node:fs/promises", async (original) => {
+  const actual = await original<typeof import("node:fs/promises")>();
+  return { ...actual, writeFile: vi.fn(actual.writeFile) };
+});
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ExtractedDocument } from "./html-text";
 import {
   bareUploadId,
@@ -63,7 +69,8 @@ describe("the extracted-document sidecar (P0-02)", () => {
     await writeUploadDoc(hash16, key, doc);
 
     expect(path.basename(docPath(hash16))).toBe(`${hash16}.doc.json`);
-    expect((await stat(docPath(hash16))).mode & 0o777).toBe(0o600);
+    expect(vi.mocked(writeFile).mock.calls.some(([name, , options]) => String(name).includes(".doc.json.") && typeof options === "object" && options !== null && "mode" in options && options.mode === 0o600)).toBe(true);
+    if (process.platform !== "win32") expect((await stat(docPath(hash16))).mode & 0o777).toBe(0o600);
     expect((await readdir(UPLOAD_DIR)).filter((name) => name.startsWith(hash16) && name.endsWith(".tmp"))).toEqual([]);
     // The owner's key is not written into the file; a digest of the whole
     // cache key is.
