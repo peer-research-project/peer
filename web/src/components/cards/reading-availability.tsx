@@ -4,7 +4,7 @@ import { useEffect, useSyncExternalStore } from "react";
 import type { Paper } from "@/types";
 import type { PaperReading } from "@/lib/papers/reading";
 import { hasReadableText } from "@/lib/papers/readability";
-import { buildReadingKey, readCached, READING_VERSION, rememberReading } from "@/components/reader/use-reading";
+import { buildReadingKey, fingerprintReadingSource, readCached, READING_VERSION, rememberReading } from "@/components/reader/use-reading";
 
 type State = "checking" | "readable" | "abstract" | "unavailable" | "unknown";
 const states = new Map<string, { state: State; at: number }>();
@@ -35,12 +35,13 @@ function pump() {
 
 async function check({ key, paper, refresh }: { key: string; paper: Paper; refresh: boolean }) {
   try {
-    const url = `/api/papers/${encodeURIComponent(paper.id)}/reading?v=${READING_VERSION}&availability=1${paper.fullTextUploadId ? `&upload=${encodeURIComponent(paper.fullTextUploadId)}` : ""}${refresh ? "&refresh=1" : ""}`;
+    const fingerprint = fingerprintReadingSource(paper);
+    const url = `/api/papers/${encodeURIComponent(paper.id)}/reading?v=${READING_VERSION}&availability=1&sf=1&source=${encodeURIComponent(fingerprint)}${paper.fullTextUploadId ? `&upload=${encodeURIComponent(paper.fullTextUploadId)}` : ""}${refresh ? "&refresh=1" : ""}`;
     const res = await fetch(url, { signal: AbortSignal.timeout(30000) });
     if (!res.ok) throw new Error("Reading unavailable");
     const availability = res.headers.get("X-Peer-Readability");
     const reading = await res.json() as PaperReading;
-    if (reading.version !== READING_VERSION || !reading.provenance) throw new Error("Unexpected reading");
+    if (reading.version !== READING_VERSION || reading.sourceFingerprint !== fingerprint || !reading.provenance) throw new Error("Unexpected reading");
     if (availability === "readable" && hasReadableBody(reading)) {
       rememberReading(key, reading);
       setState(key, "readable");
@@ -57,11 +58,11 @@ async function check({ key, paper, refresh }: { key: string; paper: Paper; refre
 }
 
 function schedule(paper: Paper, refresh = false) {
-  const key = buildReadingKey(paper.id, paper.fullTextUploadId, paper.revision);
+  const key = buildReadingKey(paper.id, paper.fullTextUploadId, paper.revision, fingerprintReadingSource(paper));
   const existing = states.get(key);
   if (queued.has(key)) return;
   const cached = readCached(key);
-  if (!refresh && cached && hasReadableBody(cached)) {
+  if (!refresh && cached && cached.sourceFingerprint === fingerprintReadingSource(paper) && hasReadableBody(cached)) {
     setState(key, "readable");
     notify();
     return;
@@ -83,7 +84,7 @@ const labels: Record<State, string> = {
 };
 
 export function ReadingAvailability({ paper }: { paper: Paper }) {
-  const key = buildReadingKey(paper.id, paper.fullTextUploadId, paper.revision);
+  const key = buildReadingKey(paper.id, paper.fullTextUploadId, paper.revision, fingerprintReadingSource(paper));
   const state = useSyncExternalStore<State>(subscribe, () => states.get(key)?.state ?? "checking", () => "checking");
   useEffect(() => { schedule(paper); }, [key, paper]);
   if (state === "unknown") {
