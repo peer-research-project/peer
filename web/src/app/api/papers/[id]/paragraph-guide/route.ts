@@ -179,6 +179,11 @@ async function handle(req: NextRequest, rawId: string): Promise<Response> {
     arxivId: arxivIdFromPaper(body.paper),
     openAlexId: openAlexIdFromPaper(body.paper),
   });
+  // Retrieval can outlive ownership or an upload revision. Check before a
+  // cached guide is returned or any extracted text is sent to a model.
+  if (!(await uploadStillCurrent(privateHash, startRevision))) {
+    return reply({ error: "Upload no longer available" }, 410);
+  }
   const doc = fullText.status === "ok" ? fullText.doc : undefined;
   if (!doc || doc.sections.length === 0) return reply({ unavailable: true } satisfies ParagraphGuideResult);
 
