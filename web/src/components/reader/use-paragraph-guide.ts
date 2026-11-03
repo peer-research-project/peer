@@ -38,7 +38,7 @@ import { apiFetch } from "@/lib/api";
 import type { ProviderOverrideConfig } from "@/lib/llm/providers/types";
 import { GUIDE_CAPS, type GistRecord, type ParagraphGuide } from "@/lib/papers/paragraph-guide";
 import { restorePartition, type GuidePartition } from "@/lib/papers/reading-partition";
-import { buildReadingKey } from "./use-reading";
+import { buildReadingKey, fingerprintReadingSource } from "./use-reading";
 
 // v2 (P10-07a): a guide may carry a partition. An older entry is valid gists but, without one,
 // would keep an unheaded paper at one row for up to a day; the bump makes it ask once.
@@ -168,7 +168,7 @@ export function useParagraphGuide({
   llmOverride?: ProviderOverrideConfig;
 }): ParagraphGuideView {
   const paperId = paper?.id;
-  const key = paperId ? buildReadingKey(paperId, paper?.fullTextUploadId, paper?.revision) : "";
+  const key = paper ? buildReadingKey(paper.id, paper.fullTextUploadId, paper.revision, fingerprintReadingSource(paper)) : "";
 
   // Read once per paper. The server renders with no window and the first client
   // render has no paper yet (the store hydrates after mount), so the two agree.
@@ -176,7 +176,7 @@ export function useParagraphGuide({
   const [fetched, setFetched] = useState<{ id: string; guide: ParagraphGuide } | null>(null);
 
   // The request reads the paper and the reader's key through a ref: the effect is
-  // keyed on `key` (which carries the paper's id and its upload revision), and
+  // keyed on `key` (which carries the paper id, upload revision and source fingerprint), and
   // the page hands a new object for either on many renders.
   const latest = useRef({ paper, llmOverride });
   useEffect(() => {

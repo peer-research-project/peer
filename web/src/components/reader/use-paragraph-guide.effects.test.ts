@@ -18,7 +18,7 @@ import { useEffect, useState } from "react";
 import { hookRuntime } from "@/test-support/hook-runtime";
 import type { Paper } from "@/types";
 import type { ParagraphGuide } from "@/lib/papers/paragraph-guide";
-import { buildReadingKey } from "./use-reading";
+import { buildReadingKey, fingerprintReadingSource } from "./use-reading";
 import type { GuidePartition } from "@/lib/papers/reading-partition";
 import { PARAGRAPH_GUIDE_STORAGE_KEY, keptParagraphGuide, rememberParagraphGuide, useParagraphGuide } from "./use-paragraph-guide";
 
@@ -122,7 +122,7 @@ describe("useParagraphGuide with effects running — Peer's gists, asked for onc
     expect(sent).toHaveLength(1);
     expect(second).toEqual(GISTS);
     const kept = JSON.parse(localStorage.getItem(PARAGRAPH_GUIDE_STORAGE_KEY) ?? "{}") as Record<string, unknown>;
-    expect(Object.keys(kept)).toEqual([buildReadingKey(base.id, undefined, undefined)]);
+    expect(Object.keys(kept)).toEqual([buildReadingKey(base.id, undefined, undefined, fingerprintReadingSource(base))]);
   });
 
   it("sends the paper and, when the reader has one, their own key — and nothing else about them", async () => {
@@ -163,6 +163,47 @@ describe("useParagraphGuide with effects running — Peer's gists, asked for onc
     expect(sent).toHaveLength(3);
   });
 
+  it("does not reuse a legacy key or a guide from an earlier source at the same id and revision", async () => {
+    const first = { ...attached, summaryIntro: "Invented earlier abstract." };
+    const changed = { ...first, summaryIntro: "Invented revised abstract." };
+    const oldKey = buildReadingKey(first.id, first.fullTextUploadId, first.revision);
+    rememberParagraphGuide(oldKey, { guide });
+    expect(await open(first)).toEqual(GISTS);
+    const nextGists = { s1: { 0: "A new fictional finding." } };
+    answer = async () => json({ guide: { docHash: "new", gists: nextGists } });
+    expect(await open(changed)).toEqual(nextGists);
+    expect(sent).toHaveLength(2);
+    expect((sent[1].body.paper as Paper).summaryIntro).toBe(changed.summaryIntro);
+    expect(await open(changed)).toEqual(nextGists);
+    expect(sent).toHaveLength(2);
+  });
+
+  it("aborts an old-source request and does not store its late result after a source change", async () => {
+    const old = { ...attached, summaryIntro: "Invented earlier abstract." };
+    const changed = { ...old, summaryIntro: "Invented revised abstract." };
+    const nextGists = { s1: { 0: "A new fictional finding." } };
+    let release: (response: Response) => void = () => {};
+    answer = () => sent.length === 1 ? new Promise<Response>((resolve) => { release = resolve; }) : Promise.resolve(json({ guide: { docHash: "new", gists: nextGists } }));
+    const opened = await hookRuntime.mount(() => {
+      const [current, setCurrent] = useState(old);
+      const view = useParagraphGuide(defaults(current));
+      useEffect(() => {
+        if (current.summaryIntro === old.summaryIntro) setCurrent(changed);
+        else release(json({ guide, cached: false }));
+      }, [current]);
+      return view;
+    });
+    expect(sent).toHaveLength(2);
+    expect(sent[0].signal?.aborted).toBe(true);
+    expect((sent[1].body.paper as Paper).summaryIntro).toBe(changed.summaryIntro);
+    expect(opened.value.gists).toEqual(nextGists);
+    const cache = JSON.parse(localStorage.getItem(PARAGRAPH_GUIDE_STORAGE_KEY) ?? "{}") as Record<string, unknown>;
+    const keyFor = (p: Paper) => buildReadingKey(p.id, p.fullTextUploadId, p.revision, fingerprintReadingSource(p));
+    expect(cache[keyFor(old)]).toBeUndefined();
+    expect(cache[keyFor(changed)]).toBeDefined();
+    opened.unmount();
+  });
+
   it("honours a kept `skipped` for a day, and asks again after it", async () => {
     answer = async () => json({ skipped: "too_many_paragraphs" });
     expect(await open(base)).toBeUndefined();
@@ -186,10 +227,10 @@ describe("useParagraphGuide with effects running — Peer's gists, asked for onc
     await open(base);
 
     expect(sent).toHaveLength(1);
-    expect(keptParagraphGuide(buildReadingKey(base.id, undefined, undefined))).toEqual({ unavailable: true });
+    expect(keptParagraphGuide(buildReadingKey(base.id, undefined, undefined, fingerprintReadingSource(base)))).toEqual({ unavailable: true });
 
     vi.setSystemTime(new Date("2026-10-07T12:01:00.000Z"));
-    expect(keptParagraphGuide(buildReadingKey(base.id, undefined, undefined))).toBeNull();
+    expect(keptParagraphGuide(buildReadingKey(base.id, undefined, undefined, fingerprintReadingSource(base)))).toBeNull();
     await open(base);
     expect(sent).toHaveLength(2);
   });
@@ -277,15 +318,15 @@ describe("useParagraphGuide with effects running — Peer's gists, asked for onc
     const kept = JSON.parse(localStorage.getItem(PARAGRAPH_GUIDE_STORAGE_KEY) ?? "{}") as Record<string, unknown>;
 
     expect(Object.keys(kept)).toHaveLength(24);
-    expect(kept[buildReadingKey("openalex:W8000000000", undefined, undefined)]).toBeUndefined();
-    expect(kept[buildReadingKey("openalex:W8000000025", undefined, undefined)]).toBeDefined();
+    expect(kept[buildReadingKey("openalex:W8000000000", undefined, undefined, fingerprintReadingSource(base))]).toBeUndefined();
+    expect(kept[buildReadingKey("openalex:W8000000025", undefined, undefined, fingerprintReadingSource(base))]).toBeDefined();
   });
 
   it("survives a browser store that is corrupt, full or blocked: the page still gets its gists", async () => {
     localStorage.setItem(PARAGRAPH_GUIDE_STORAGE_KEY, "{not json");
     expect(await open(base)).toEqual(GISTS);
 
-    localStorage.setItem(PARAGRAPH_GUIDE_STORAGE_KEY, JSON.stringify({ [buildReadingKey(base.id, undefined, undefined)]: { at: "yesterday", guide: 5 } }));
+    localStorage.setItem(PARAGRAPH_GUIDE_STORAGE_KEY, JSON.stringify({ [buildReadingKey(base.id, undefined, undefined, fingerprintReadingSource(base))]: { at: "yesterday", guide: 5 } }));
     sent.length = 0;
     expect(await open(base)).toEqual(GISTS);
     expect(sent).toHaveLength(1);
@@ -308,7 +349,7 @@ describe("useParagraphGuide with effects running — Peer's gists, asked for onc
   });
 
   it("can be told what to keep and reads it back as it was kept", () => {
-    const key = buildReadingKey(base.id, undefined, undefined);
+    const key = buildReadingKey(base.id, undefined, undefined, fingerprintReadingSource(base));
     rememberParagraphGuide(key, { guide });
     expect(keptParagraphGuide(key)).toEqual({ guide });
     rememberParagraphGuide(key, { skipped: "too_many_paragraphs" });
@@ -331,7 +372,7 @@ describe("useParagraphGuide with a partition — kept, re-read through the sanit
   };
   const withPartition: ParagraphGuide = { docHash: "abc123", gists: GISTS, partition: PARTITION };
   const partitionOnly: ParagraphGuide = { docHash: "abc123", gists: {}, partition: PARTITION };
-  const key = buildReadingKey(base.id, undefined, undefined);
+  const key = buildReadingKey(base.id, undefined, undefined, fingerprintReadingSource(base));
 
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ["Date"] });
