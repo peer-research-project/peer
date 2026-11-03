@@ -175,7 +175,7 @@ function rule3Problems(source: string): string[] {
     .replace(/\s+/g, " ")
     .trim();
   if (!rest.startsWith("{!hasBody && answers}")) problems.push("a paper with no body no longer shows its answers first in the Summary's container");
-  if (rest.replace("{!hasBody && answers}", "").replace(/<\/div> \)\}$/, "").trim() !== "") problems.push("a block stands in the Summary's container under no id of its own");
+  if (rest.replace("{!hasBody && answers}", "").replace(/<\/div> \)\} <\/BookReader>\}$/, "").trim() !== "") problems.push("a block stands in the Summary's container under no id of its own");
   // The Summary tab is brought back for the notes' blue square, by the page's own tab.
   if (!p.includes(SHOW_SUMMARY)) problems.push("the page has no way to show the Summary tab for a note's blue square");
   if (!p.includes(SUMMARY_HOST)) problems.push("the page does not register the Summary's reveal for the notes' blue square");
@@ -192,7 +192,7 @@ describe("rule 3 — the blue square for a Summary or an answer note", () => {
 
   it("keeps the words' container and the common slot as the layout pins have them", () => {
     const p = squash(page);
-    expect(p).toMatch(/ words=\{digestion \? null : \( <div data-explain-source="summary" className="contents"> <PaperWords/);
+    expect(between(p, " words={", " additions={")).toMatch(/^ words=\{digestion \? null : \( <div data-explain-source="summary" className="contents"> .*?<PaperWords/);
     expect(p).toContain('<div data-explain-source="answer" className="contents">{answers}</div>');
     expect(p).toContain("{!hasBody && answers}");
   });
