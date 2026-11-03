@@ -99,8 +99,11 @@ describe("tryExtractPdfText", () => {
 
     expect(result).toEqual({
       ok: false,
-      reason: "Response was not a PDF (likely a landing/paywall page).",
+      reason: "Response was not a PDF.",
+      status: undefined,
+      finalUrl: undefined,
     });
+    expect(result.reason).not.toMatch(/paywall|subscription/i);
   });
 });
 

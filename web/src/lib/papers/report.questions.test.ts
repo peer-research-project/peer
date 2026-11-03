@@ -70,9 +70,19 @@ describe("a report without questions is the report it was (§1g.3)", () => {
     expect(sanitizePaperReport(RAW)).not.toHaveProperty("terms");
   });
 
-  it("verifies byte-identically", () => {
+  it("preserves all other verified bytes while grounding unsupported free prose", () => {
     const verified = verifyReportEvidence(sanitizePaperReport(RAW), { abstract: ABSTRACT, doc: DOC });
-    expect(JSON.stringify(verified)).toBe(JSON.stringify(BEFORE.verified));
+    // The authorized source-truth guard replaces unsupported free summaries
+    // with supported excerpts and removes unsupported novelty. Keep BEFORE as
+    // the original baseline and require every remaining byte to stay intact.
+    const expected = structuredClone(BEFORE.verified);
+    expected.report.whatItProposes.summary = SENT.methods;
+    delete expected.report.whatItProposes.newHere;
+    expected.report.resultsAndSignificance.summary = SENT.results;
+    expect(JSON.stringify(verified)).toBe(JSON.stringify(expected));
+    expect(verified.report.whatItProposes.summary).not.toBe(BEFORE.verified.report.whatItProposes.summary);
+    expect(verified.report.whatItProposes).not.toHaveProperty("newHere");
+    expect(verified.report.resultsAndSignificance.summary).not.toBe(BEFORE.verified.report.resultsAndSignificance.summary);
   });
 });
 
