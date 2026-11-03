@@ -20,9 +20,9 @@ import { useRouter } from "next/navigation";
 import type { Route } from "next";
 import { useCallback, useEffect, useRef, useSyncExternalStore, type ReactNode } from "react";
 import { create } from "zustand";
-import type { PaperReading } from "@/lib/papers/reading";
+import { READING_CACHE_KEY, READING_CACHE_TTL_MS, READING_VERSION } from "@/components/reader/use-reading";
 import { observedReadingKey, READING_IDENTITY_EVENT } from "@/lib/papers/reading-identity";
-import { ANSWERS_BLOCK_ID, SUMMARY_ID_PREFIX, isPageBlockId, type AnchorSection } from "@/lib/notes/anchor-blocks";
+import { ANSWERS_BLOCK_ID, SUMMARY_ID_PREFIX, hasReadableAnchorBody, isPageBlockId, type AnchorSection } from "@/lib/notes/anchor-blocks";
 import { stickyTitle } from "@/lib/notes/blocks";
 import type { HighlightColourId, NoteAnchor } from "@/lib/notes/types";
 import { scrollBehavior } from "@/lib/reader/scroll-motion";
@@ -323,16 +323,6 @@ export const PASSAGE_LOST_LINE = "This passage is not in this version of the pap
 /** P11-27: the sections of a reading as far as an anchor goes — paragraphs, and (where the stored reading has them) the heading and the figures' captions. */
 type Body = readonly AnchorSection[];
 
-/** The key of the reading the reading page keeps in this browser (`use-reading.ts`); an entry's key starts with the paper's id. */
-const READING_CACHE_KEY = "peer-reading-v4";
-/**
- * The two gates `use-reading.ts` puts on a cached reading, copied from there (its `READING_VERSION` and `TTL_MS` are not
- * exported): an entry of another shape version, or older than a day, is not the reading the page would show, so it is
- * "not known". Typed from the document itself, so a bump of `PaperReading["version"]` stops the build here until this follows.
- */
-const READING_VERSION: PaperReading["version"] = 19;
-const READING_TTL_MS = 24 * 60 * 60 * 1000;
-
 let parsedFrom: string | null = null;
 let parsed: Record<string, { ts?: unknown; reading?: { version?: unknown; sourceFingerprint?: unknown; body?: unknown } } | undefined> = {};
 /** The cache is parsed once per change of its text, not once per heading per render. */
@@ -367,10 +357,10 @@ export function storedBodyOf(paperId: string, storage?: Pick<Storage, "getItem">
       if (entry?.reading?.version !== READING_VERSION) continue;
       const keyFingerprint = key.match(/\|source:([a-z0-9]+)$/)?.[1] ?? "";
       if (entry.reading.sourceFingerprint !== keyFingerprint) continue;
-      if (typeof entry.ts !== "number" || now - entry.ts >= READING_TTL_MS) continue;
+      if (typeof entry.ts !== "number" || now - entry.ts >= READING_CACHE_TTL_MS) continue;
       const body = entry.reading.body;
       const sound = Array.isArray(body) && body.every((one) => Array.isArray(one?.paragraphs) && one.paragraphs.every((p: unknown) => typeof p === "string"));
-      if (!sound) continue;
+      if (!sound || !hasReadableAnchorBody(body as Body)) continue;
       const ts = entry.ts;
       if (!best || ts > best.ts) best = { ts, body: body as Body };
     }
@@ -389,7 +379,7 @@ export function passageIsLost(anchor: NoteAnchor, id: string, lost: Readonly<Rec
   // P11-28: a Summary block's or the answers' words are the page's, not the paper's body, which never holds them: nothing off the page can say they are gone.
   if (isPageBlockId(anchor.paragraphId)) return false;
   if (lost[id] === true) return true;
-  if (!body || anchor.start === undefined || anchor.end === undefined) return false;
+  if (!body || !hasReadableAnchorBody(body) || anchor.start === undefined || anchor.end === undefined) return false;
   const { start, end, quote, n, paragraphId } = anchor;
   return resolveAnchors(body, { [paragraphId]: [{ id, n, start, end, quote }] }).lost.length > 0;
 }
