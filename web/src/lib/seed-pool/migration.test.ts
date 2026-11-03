@@ -74,3 +74,14 @@ it("illustrates the legacy UTC-key versus Tokyo served-day boundary", () => {
   expect(day("UTC")).toBe("2026-09-24");
   expect(day("Asia/Tokyo")).toBe("2026-09-25");
 });
+
+
+it("serializes digest claims and protects legacy same-owner local-day deliveries", () => {
+  const fn = body("claim_briefing_delivery");
+  expect(fn).toContain("pg_advisory_xact_lock");
+  expect(fn).toContain("if not found then raise exception");
+  expect(fn).toContain("perform now() at time zone v_zone");
+  expect(fn).toMatch(/user_id=p_user_id and local_date is null and \(delivered_at at time zone v_zone\)::date=v_day/i);
+  expect(fn.indexOf("pg_advisory_xact_lock")).toBeLessThan(fn.indexOf("insert into public.briefing_deliveries"));
+  expect(fn.indexOf("local_date is null")).toBeLessThan(fn.indexOf("insert into public.briefing_deliveries"));
+});

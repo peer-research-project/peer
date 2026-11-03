@@ -272,6 +272,32 @@ end $$;
 revoke all on function public.seed_pool_stage_asset(uuid,bigint,uuid,text,text,text,text,jsonb,jsonb,text) from public,anon,authenticated;
 grant execute on function public.seed_pool_stage_asset(uuid,bigint,uuid,text,text,text,text,jsonb,jsonb,text) to service_role;
 
+-- Preserve historical deliveries written before local_date existed. The
+-- owner lock is shared with seed mutations and fenced digest publication.
+-- Missing profiles, invalid timezones and invalid dates fail closed.
+create or replace function public.claim_briefing_delivery(
+  p_user_id uuid, p_local_date text, p_channel text, p_item_ids text[], p_payload jsonb
+) returns table (id bigint) language plpgsql as $$
+declare v_zone text; v_day date;
+begin
+  perform pg_advisory_xact_lock(hashtextextended(p_user_id::text,725113));
+  select coalesce(nullif(digest_timezone,''),'UTC') into v_zone from public.profiles where user_id=p_user_id;
+  if not found then raise exception 'claim_briefing_delivery owner profile unavailable'; end if;
+  v_day := p_local_date::date;
+  if v_day is null then raise exception 'claim_briefing_delivery requires a non-null p_local_date'; end if;
+  perform now() at time zone v_zone;
+  if exists(select 1 from public.briefing_deliveries where user_id=p_user_id and local_date is null and (delivered_at at time zone v_zone)::date=v_day) then
+    return;
+  end if;
+  return query
+    insert into public.briefing_deliveries (user_id, local_date, channel, item_ids, payload)
+    values (p_user_id, p_local_date, p_channel, p_item_ids, p_payload)
+    on conflict (user_id, local_date) where local_date is not null do nothing
+    returning briefing_deliveries.id;
+end $$;
+revoke all on function public.claim_briefing_delivery(uuid,text,text,text[],jsonb) from public,anon,authenticated;
+grant execute on function public.claim_briefing_delivery(uuid,text,text,text[],jsonb) to service_role;
+
 alter table public.briefing_deliveries add column if not exists seed_pool_version text;
 alter table public.briefing_deliveries add column if not exists seed_revocation_generation bigint not null default 0;
 create or replace function public.seed_pool_claim_digest(p_owner_id uuid,p_local_date date,p_expected_version text,p_expected_revocation_generation bigint,p_channel text,p_item_ids text[],p_payload jsonb)
