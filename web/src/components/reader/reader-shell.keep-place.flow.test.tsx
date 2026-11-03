@@ -56,9 +56,9 @@ const RAIL_PX = 48;
 const paragraphs = (): SimParagraph[] =>
   Array.from({ length: 60 }, (_, n) => ({ id: `paper-section-${Math.floor(n / 10) + 1}-p${n % 10}`, chars: n === 24 ? 7000 : 260 + ((n * 137) % 520) }));
 
-/** The text column's width for a window and the grid's variables: `grid-template-columns: left 12 1fr 12 margin`, the centre's 12 px padding, the 38em cap. */
-function columnFor(viewport: number, leftTrack: number, margin: number) {
-  return Math.min(CAP_PX, viewport - leftTrack - 12 - 12 - margin - 24);
+/** The text column's width for a window and the grid's variables: `grid-template-columns: left 12 1fr`, the centre's 12 px padding, the 38em cap. */
+function columnFor(viewport: number, leftTrack: number) {
+  return Math.min(CAP_PX, viewport - leftTrack - 12 - 24);
 }
 
 interface Browser {
@@ -75,7 +75,7 @@ let env: Browser;
 
 /** The window, the document, the observers and the frame queue the shell and its dividers find in a browser. */
 function browser(viewport: number): Browser {
-  const page = createReflowPage({ paragraphs: paragraphs(), column: columnFor(viewport, 320, 360) });
+  const page = createReflowPage({ paragraphs: paragraphs(), column: columnFor(viewport, 400) });
   const resize = new Set<() => void>();
   const frames: Array<() => void> = [];
   const b: Browser = {
@@ -150,7 +150,7 @@ const key = (name: string, over: Record<string, unknown> = {}) => ({ key: name, 
  * One page open: the shell, with each divider rendered by its own component in the same render (hooks in order), the refs attached and the first
  * commit's effects flushed. Every commit lays the column out again from the grid's variables, as the browser does, and tells the observers.
  */
-function open(viewport = 1280) {
+function open(viewport = 1024) {
   env = browser(viewport);
   const n = nodes();
   const overrides: Record<string, number> = {};
@@ -160,9 +160,8 @@ function open(viewport = 1280) {
   const layoutNow = (shell: ReactElement<Props>) => {
     const style = shell.props.style as Record<string, string>;
     const left = overrides["--left-pane-w"] ?? Number.parseFloat(style["--left-pane-w"]);
-    const margin = overrides["--margin-w"] ?? Number.parseFloat(style["--margin-w"]);
     const pinned = shell.props["data-left-state"] === "pinned";
-    const next = columnFor(env.viewport, pinned ? left : RAIL_PX, margin);
+    const next = columnFor(env.viewport, pinned ? left : RAIL_PX);
     if (next !== env.page.columnPx) env.page.reflow(next);
   };
   let lastShell: ReactElement<Props> | null = null;
@@ -216,7 +215,6 @@ function open(viewport = 1280) {
       pin: all.find((element) => String(element.props.className ?? "").includes("reader-pin-button"))!,
       rail: all.find((element) => element.props["data-reader-rail"] !== undefined)!,
       left: () => divider("left"),
-      margin: () => divider("margin"),
     };
   };
   return { page: env.page, look };
@@ -246,8 +244,8 @@ function runFrames() {
 }
 
 /** A drag of the divider by `dx` px: a press, `frames` frames of three pointer moves each, a release. Returns the farthest the held point stood from the line. */
-function dragged(page: Opened, pane: "left" | "margin", dx: number, p: { id: string; fraction: number }, frames = 10) {
-  const d = pane === "left" ? page.look().left() : page.look().margin();
+function dragged(page: Opened, dx: number, p: { id: string; fraction: number }, frames = 10) {
+  const d = page.look().left();
   const x0 = 500;
   stagedRuntime.event(() => d.on("onPointerDown")(pointer(d.element, "pointerdown", { clientX: x0 })));
   let farthest = 0;
@@ -266,7 +264,7 @@ function dragged(page: Opened, pane: "left" | "margin", dx: number, p: { id: str
 
 beforeEach(() => {
   vi.spyOn(console, "warn").mockImplementation(() => {});
-  useReaderPanesStore.setState({ leftPinned: undefined, leftWidth: undefined, marginWidth: undefined });
+  useReaderPanesStore.setState({ leftPinned: undefined, leftWidth: 400, marginWidth: undefined });
   useMarginStore.setState({ rect: null });
 });
 afterEach(() => {
@@ -278,41 +276,41 @@ afterEach(() => {
 
 describe("a separator dragged by the mouse", () => {
   it("re-flows the column and keeps the offset, which is the defect: the paragraph at the top is another one (no shell)", () => {
-    const p = createReflowPage({ paragraphs: paragraphs(), column: 552 });
+    const p = createReflowPage({ paragraphs: paragraphs(), column: 588 });
     readAt(p, "paper-section-5-p2", 0.5);
     const before = place(p);
-    p.reflow(492);
+    p.reflow(528);
     p.frame();
     expect(p.top()!.id).not.toBe(before.id);
   });
 
-  it("left +60 (552 to 492 px): the same paragraph stays at the top, the same line under the masthead, in every frame", () => {
+  it("left +60 (588 to 528 px): the same paragraph stays at the top, the same line under the masthead, in every frame", () => {
     const page = open();
     readAt(page.page, "paper-section-5-p2", 0.5);
     const before = place(page.page);
-    const farthest = dragged(page, "left", 60, before);
-    expect(env.page.columnPx).toBeLessThan(552);
+    const farthest = dragged(page, 60, before);
+    expect(env.page.columnPx).toBeLessThan(588);
     expect(page.page.top()!.id).toBe(before.id);
     expect(farthest).toBeLessThan(1);
   });
 
-  it("left -60 (552 to 612 px)", () => {
+  it("left -60 (588 to 646 px)", () => {
     const page = open();
     readAt(page.page, "paper-section-5-p2", 0.5);
     const before = place(page.page);
-    const farthest = dragged(page, "left", -60, before);
-    expect(env.page.columnPx).toBeGreaterThan(552);
+    const farthest = dragged(page, -60, before);
+    expect(env.page.columnPx).toBeGreaterThan(588);
     expect(page.page.top()!.id).toBe(before.id);
     expect(farthest).toBeLessThan(1);
   });
 
-  it("margin -80 (552 to 472 px)", () => {
+  it("left +80 (588 to 508 px)", () => {
     const page = open();
     readAt(page.page, "paper-section-5-p2", 0.5);
     const before = place(page.page);
-    const farthest = dragged(page, "margin", -80, before);
+    const farthest = dragged(page, 80, before);
     expect(page.page.top()!.id).toBe(before.id);
-    expect(env.page.columnPx).toBe(472);
+    expect(env.page.columnPx).toBe(508);
     expect(farthest).toBeLessThan(1);
   });
 
@@ -322,7 +320,7 @@ describe("a separator dragged by the mouse", () => {
     readAt(page.page, long, 0.5);
     const before = place(page.page);
     expect(before.id).toBe(long);
-    dragged(page, "left", 60, before);
+    dragged(page, 60, before);
     const after = place(page.page);
     expect(after.id).toBe(long);
     expect(after.fraction).toBeCloseTo(0.5, 2);
@@ -332,7 +330,7 @@ describe("a separator dragged by the mouse", () => {
     const page = open();
     readAt(page.page, "paper-section-5-p2", 0.5);
     const before = place(page.page);
-    dragged(page, "left", 60, before, 10);
+    dragged(page, 60, before, 10);
     // 10 frames of 3 pointer moves each: at most 10 corrections, at least 1; never one per move.
     expect(scrolls(env.page).length).toBeGreaterThan(0);
     expect(scrolls(env.page).length).toBeLessThanOrEqual(10);
@@ -357,52 +355,52 @@ describe("a separator dragged by the mouse", () => {
     stagedRuntime.event(() => d.on("onPointerDown")(pointer(d.element, "pointerdown")));
     for (let move = 1; move <= 6; move++) stagedRuntime.event(() => d.on("onPointerMove")(pointer(d.element, "pointermove", { clientX: 500 + move * 10 })));
     runFrames();
-    expect(env.page.columnPx).toBeLessThan(552);
+    expect(env.page.columnPx).toBeLessThan(588);
     stagedRuntime.event(() => d.on("onPointerCancel")(pointer(d.element, "pointercancel", { clientX: 560 })));
     env.page.frame();
-    expect(env.page.columnPx).toBe(552);
+    expect(env.page.columnPx).toBe(588);
     expect(page.page.top()!.id).toBe(before.id);
     expect(Math.abs(held(page.page, before))).toBeLessThan(1);
   });
 });
 
 describe("a separator moved by its keys", () => {
-  it("ArrowRight three times (552 to 504 px): the same paragraph, the same line", () => {
+  it("ArrowRight three times (588 to 540 px): the same paragraph, the same line", () => {
     const page = open();
     readAt(page.page, "paper-section-5-p2", 0.5);
     const before = place(page.page);
     for (let i = 0; i < 3; i++) stagedRuntime.event(() => page.look().left().on("onKeyDown")(key("ArrowRight")));
     env.page.frame();
-    expect(env.page.columnPx).toBe(504);
+    expect(env.page.columnPx).toBe(540);
     expect(page.page.top()!.id).toBe(before.id);
     expect(Math.abs(held(page.page, before))).toBeLessThan(1);
   });
 
-  it("End (the pane's greatest width: 552 to 416 px)", () => {
+  it("End (the pane's greatest width: 588 to 508 px)", () => {
     const page = open();
     readAt(page.page, "paper-section-5-p2", 0.5);
     const before = place(page.page);
     stagedRuntime.event(() => page.look().left().on("onKeyDown")(key("End")));
     env.page.frame();
-    expect(env.page.columnPx).toBe(416);
+    expect(env.page.columnPx).toBe(508);
     expect(page.page.top()!.id).toBe(before.id);
     expect(Math.abs(held(page.page, before))).toBeLessThan(1);
   });
 
-  it("Home on the margin (its least width: 552 to 632 px)", () => {
+  it("Home on the left (its least width: 588 to 646 px)", () => {
     const page = open();
     readAt(page.page, "paper-section-5-p2", 0.5);
     const before = place(page.page);
-    stagedRuntime.event(() => page.look().margin().on("onKeyDown")(key("Home")));
+    stagedRuntime.event(() => page.look().left().on("onKeyDown")(key("Home")));
     env.page.frame();
-    expect(env.page.columnPx).toBe(632);
+    expect(env.page.columnPx).toBe(646);
     expect(page.page.top()!.id).toBe(before.id);
     expect(Math.abs(held(page.page, before))).toBeLessThan(1);
   });
 });
 
 describe("the left pane collapsed and pinned", () => {
-  it("a collapse (552 to 646 px) and the pin that follows (back to 552): the same paragraph, the same line, both times", () => {
+  it("a collapse (588 to 646 px) and the pin that follows (back to 588): the same paragraph, the same line, both times", () => {
     const page = open();
     readAt(page.page, "paper-section-5-p2", 0.5);
     const before = place(page.page);
@@ -416,22 +414,22 @@ describe("the left pane collapsed and pinned", () => {
     stagedRuntime.event(() => (page.look().rail.props.onClick as Handler)());
     env.page.frame();
     expect(page.look().state).toBe("pinned");
-    expect(env.page.columnPx).toBe(552);
+    expect(env.page.columnPx).toBe(588);
     expect(page.page.top()!.id).toBe(before.id);
     expect(Math.abs(held(page.page, before))).toBeLessThan(1);
   });
 });
 
 describe("the window resized", () => {
-  it("1440 to 1280 (the capped column of 646 px to 552): the same paragraph, the same line", () => {
+  it("1440 to 1024 (the capped column of 646 px to 588): the same paragraph, the same line", () => {
     const page = open(1440);
     expect(env.page.columnPx).toBe(646);
     readAt(page.page, "paper-section-5-p2", 0.5);
     const before = place(page.page);
-    env.viewport = 1280;
+    env.viewport = 1024;
     stagedRuntime.event(() => [...env.resize].forEach((run) => run()));
     env.page.frame();
-    expect(env.page.columnPx).toBe(552);
+    expect(env.page.columnPx).toBe(588);
     expect(page.page.top()!.id).toBe(before.id);
     expect(Math.abs(held(page.page, before))).toBeLessThan(1);
   });
@@ -483,12 +481,15 @@ describe("Fit's and the text steps' transition (0.3 s of frames after the variab
 
 describe("the reader's own scroll", () => {
   it("is followed: after they scroll on, a drag keeps the place they scrolled to", () => {
+    const now = vi.spyOn(performance, "now").mockReturnValue(0);
     const page = open();
     readAt(page.page, "paper-section-3-p1", 0.5);
-    dragged(page, "left", 40, place(page.page));
+    dragged(page, 40, place(page.page));
     readAt(page.page, "paper-section-5-p2", 0.3);
+    runFrames(); // Deliver the browser frame scheduled by the reader scroll before a new drag.
+    now.mockReturnValue(200); // The reader has stopped scrolling; reverse corrections may resume.
     const second = place(page.page);
-    const farthest = dragged(page, "margin", -60, second);
+    const farthest = dragged(page, -60, second);
     expect(page.page.top()!.id).toBe(second.id);
     expect(farthest).toBeLessThan(1);
   });
@@ -498,7 +499,7 @@ describe("the top and the foot of the page are left alone", () => {
   it("at scroll 0, a drag, the keys, a collapse and a pin make no scroll", () => {
     const page = open();
     expect(env.page.scrollY).toBe(0);
-    dragged(page, "left", 60, { id: "paper-section-1-p0", fraction: 0 });
+    dragged(page, 60, { id: "paper-section-1-p0", fraction: 0 });
     stagedRuntime.event(() => page.look().left().on("onKeyDown")(key("End")));
     stagedRuntime.event(() => (page.look().pin.props.onClick as Handler)());
     stagedRuntime.event(() => (page.look().rail.props.onClick as Handler)());
@@ -511,7 +512,7 @@ describe("the top and the foot of the page are left alone", () => {
     const page = open();
     env.page.scroll(1e9);
     env.page.frame();
-    dragged(page, "margin", -60, { id: "paper-section-6-p9", fraction: 0 });
+    dragged(page, -60, { id: "paper-section-6-p9", fraction: 0 });
     stagedRuntime.event(() => page.look().left().on("onKeyDown")(key("Home")));
     stagedRuntime.event(() => (page.look().pin.props.onClick as Handler)());
     stagedRuntime.event(() => (page.look().rail.props.onClick as Handler)());
@@ -545,7 +546,7 @@ describe("the shell's hold on the page", () => {
     const mounted = stagedRuntime.mount(() => ReaderShell(props), (output) => {
       for (const element of elements(output as ReactNode)) {
         const ref = element.props.ref as { current: unknown } | undefined;
-        if (ref && typeof ref === "object" && String(element.props.className ?? "").includes("reader-shell")) ref.current = { style: { setProperty: vi.fn() }, querySelector: () => ({ getBoundingClientRect: () => ({ width: 552 }) }) };
+        if (ref && typeof ref === "object" && String(element.props.className ?? "").includes("reader-shell")) ref.current = { style: { setProperty: vi.fn() }, querySelector: () => ({ getBoundingClientRect: () => ({ width: 588 }) }) };
       }
     });
     expect(() => stagedRuntime.flush()).not.toThrow();
