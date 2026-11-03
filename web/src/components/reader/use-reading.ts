@@ -17,9 +17,9 @@ import { fingerprintReadingSource } from "@/lib/papers/reading-source";
 import { recordReadingKey } from "@/lib/papers/reading-identity";
 export { fingerprintReadingSource } from "@/lib/papers/reading-source";
 
-const STORAGE_KEY = "peer-reading-v4";
+export const READING_CACHE_KEY = "peer-reading-v4";
 const MAX_ENTRIES = 40;
-const TTL_MS = 24 * 60 * 60 * 1000;
+export const READING_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 /** The shape both gates below accept. Typed from the document itself, so
  *  bumping `PaperReading["version"]` is the only edit a shape change needs.
  *
@@ -58,7 +58,7 @@ export function buildReadingKey(
 function readCache(): ReadingCache {
   if (typeof window === "undefined") return {};
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(READING_CACHE_KEY);
     if (!raw) return {};
     const parsed: unknown = JSON.parse(raw);
     return parsed && typeof parsed === "object" ? (parsed as ReadingCache) : {};
@@ -70,7 +70,7 @@ function readCache(): ReadingCache {
 export function readCached(key: string): PaperReading | null {
   const entry = readCache()[key];
   if (!entry?.reading || entry.reading.version !== READING_VERSION) return null;
-  if (Date.now() - (entry.ts ?? 0) >= TTL_MS) return null;
+  if (Date.now() - (entry.ts ?? 0) >= READING_CACHE_TTL_MS) return null;
   return entry.reading;
 }
 
@@ -90,7 +90,7 @@ function writeCached(key: string, reading: PaperReading): void {
         .sort((a, b) => (b[1].ts ?? 0) - (a[1].ts ?? 0))
         .slice(0, MAX_ENTRIES),
     );
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(pruned));
+    localStorage.setItem(READING_CACHE_KEY, JSON.stringify(pruned));
   } catch {
     // The reading is already on screen; the cache is a convenience.
   }
