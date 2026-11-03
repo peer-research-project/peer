@@ -78,4 +78,3 @@ describe("availability uses the current source identity", () => {
  });
 
 });
-

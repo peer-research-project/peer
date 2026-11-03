@@ -13,4 +13,3 @@ describe("seed setup navigation wiring", () => {
     expect(page).toContain('and discard unsaved changes');
   });
 });
-
