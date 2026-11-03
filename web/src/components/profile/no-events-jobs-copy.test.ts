@@ -63,6 +63,7 @@ function copyHits(scan: Scan): string[] {
 
 function identifierHits(scan: Scan): string[] {
   return [...new Set(scan.identifiers)].filter((id) =>
+    !["addEventListener", "removeEventListener"].includes(id) &&
     words(id).some((w) => w === "event" || w === "events" || w === "job" || w === "jobs"),
   );
 }
@@ -90,7 +91,8 @@ describe("the scan itself (control: it must be able to fail)", () => {
 
   it("finds an identifier that names an event or a job, and not a word that merely contains one", () => {
     expect(identifierHits(scanSource(sample))).toEqual(["eventPool"]);
-    expect(identifierHits(scanSource("e.preventDefault(); const eventual = 1; const jobless = 2;"))).toEqual([]);
+    expect(identifierHits(scanSource("e.preventDefault(); window.addEventListener(); window.removeEventListener(); const eventual = 1; const jobless = 2;"))).toEqual([]);
+    expect(identifierHits(scanSource("const eventListenerJobs = []; const jobs = [];"))).toEqual(["eventListenerJobs", "jobs"]);
   });
 });
 
