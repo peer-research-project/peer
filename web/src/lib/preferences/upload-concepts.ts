@@ -101,6 +101,26 @@ function isAcceptableCandidate(label: string): boolean {
   return !tokens.every((token) => STOP.has(token) || isGenericTerm(token));
 }
 
+// R-P1 (W9, 2026-11-04): a phrase may not start or end on a verb-like or
+// function word ("electrolyte concentration affects", "retention after rain").
+// The n-gram builder already breaks on every STOP word and on tokens shorter
+// than three letters, so of this list only affects/affect/affected/after can
+// reach a candidate today; the rest are listed so the rule reads as ruled.
+// Trimming is a filter: the trimmed phrase ("electrolyte concentration") is
+// always a candidate of its own, from the same occurrences, with at least the
+// same count and title flag, so dropping the untrimmed form is "trim, then
+// dedupe" without counting any occurrence twice. The trimmed phrase still
+// faces every other gate (a single word must be a known domain term), and no
+// score or weight changes. A verb inside a phrase ("density affects water")
+// is outside this rule.
+const BOUNDARY_WORDS = new Set(("affects affect affected using used shows show is are was were " +
+  "of for with and the a an to in on after under than how").split(" "));
+
+function endsOnFunctionWord(label: string): boolean {
+  const tokens = label.split(" ");
+  return BOUNDARY_WORDS.has(tokens[0]) || BOUNDARY_WORDS.has(tokens[tokens.length - 1]);
+}
+
 // 9-21: rule-based facet classification (handoff §4.1's method/material/topic
 // split) — a short, closed cue list, never a model call or taxonomy lookup.
 const METHOD_CUES = new Set([
@@ -154,7 +174,7 @@ export function extractUploadConcepts(doc: ExtractedDocument): PreferenceConcept
     }
   }
   const ranked = [...candidates].filter(([label, c]) => label.length <= 70 && (c.title || c.count >= 2))
-    .filter(([label]) => isAcceptableCandidate(label))
+    .filter(([label]) => isAcceptableCandidate(label) && !endsOnFunctionWord(label))
     .sort((a, b) => b[1].score - a[1].score || a[0].localeCompare(b[0]));
   const out: PreferenceConcept[] = [];
   for (const [label, c] of ranked) {

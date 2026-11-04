@@ -240,3 +240,38 @@ describe("the extraction version after a cut sentence is joined across a page br
     expect(UPLOAD_CONCEPT_EXTRACTION_VERSION).toBeGreaterThanOrEqual(13);
   });
 });
+
+// R-P1 (W9, 2026-11-04): seed reasons named phrases that end on a verb or a
+// function word ("electrolyte concentration affects", "canopy density
+// affects", "affects cycling stability"). Invented text, shaped like the
+// fictional hosted fixtures.
+describe("R-P1 phrases never start or end on a verb-like or function word", () => {
+  const BOUNDARY = new Set("affects affect affected using used shows show is are was were of for with and the a an to in on after under than how".split(" "));
+  const edge = (label: string) => { const t = label.split(" "); return BOUNDARY.has(t[0]) || BOUNDARY.has(t[t.length - 1]); };
+  const batteryDoc: ExtractedDocument = {
+    title: "", source: "pdf", figureCaptions: [],
+    sections: [{ id: "s0", heading: "Body", canonical: "body", text: ("This invented paper studies electrolyte stability in fictional cells. The question is how electrolyte concentration affects cycling stability. " +
+      "Discharge affects suspended load in an invented channel. We measured cell capacity using electrochemical cycling. ").repeat(4) }],
+  };
+  const canopyDoc: ExtractedDocument = {
+    title: "", source: "pdf", figureCaptions: [],
+    sections: [{ id: "s0", heading: "Body", canonical: "body", text: "The question is how canopy density affects water retention after rain in fictional trees. Canopy moisture was logged. ".repeat(4) }],
+  };
+
+  it("trims boundary verbs and function words, keeping the phrase they wrapped", () => {
+    const battery = extractUploadConcepts(batteryDoc).map((c) => c.label);
+    const canopy = extractUploadConcepts(canopyDoc).map((c) => c.label);
+    for (const label of [...battery, ...canopy]) expect(edge(label), label).toBe(false);
+    expect(battery).toEqual(expect.arrayContaining(["electrolyte concentration", "cycling stability", "suspended load"]));
+    expect(battery).not.toEqual(expect.arrayContaining(["electrolyte concentration affects"]));
+    expect(canopy).toEqual(expect.arrayContaining(["canopy density", "water retention"]));
+  });
+  it("drops a phrase whose trimmed rest is below the minimum, and lists each trimmed phrase once", () => {
+    const doc: ExtractedDocument = { title: "", source: "pdf", figureCaptions: [], sections: [{ id: "s0", heading: "Body", canonical: "body", text: "Density affects. Retention after. Glacier meltwater affects glacier meltwater. ".repeat(3) }] };
+    const labels = extractUploadConcepts(doc).map((c) => c.label);
+    expect(labels).not.toContain("density");
+    expect(labels).not.toContain("retention");
+    expect(labels.filter((label) => label === "glacier meltwater")).toHaveLength(1);
+    for (const label of labels) expect(edge(label), label).toBe(false);
+  });
+});
