@@ -71,8 +71,19 @@ describe("D-B9-1 — rename from the rail while the note is open, then a body ed
   });
 
   it("the editor is wired to the rule: an effect on the note's stored title commits the adopted doc", () => {
-    expect(editor).toMatch(/const seenTitle = useRef\(note\.title\);/);
-    expect(editor).toMatch(/adoptStoredTitle\(docRef\.current, seenTitle\.current, note\.title\)/);
-    expect(editor).toMatch(/\}, \[note\.title, commit\]\);/);
+    // The effect itself, not the whole file: from the `seenTitle` ref to the end of the effect keyed on the title.
+    const start = editor.indexOf("const seenTitle = useRef(note.title);");
+    expect(start).toBeGreaterThan(-1);
+    const endMark = "}, [note.title, commit]);";
+    const end = editor.indexOf(endMark, start);
+    expect(end).toBeGreaterThan(start);
+    const effect = editor.slice(start, end + endMark.length);
+    expect(effect).toMatch(/useEffect\(\(\) => \{/);
+    // Adopts against the doc the editor holds and the title it last saw…
+    expect(effect).toMatch(/const next = adoptStoredTitle\(docRef\.current, seenTitle\.current, note\.title\);/);
+    // …moves what it has seen, so a later outside rename is still told apart from the reader's own edit…
+    expect(effect).toMatch(/seenTitle\.current = note\.title;/);
+    // …and commits the adopted doc (the field, the tab title and the autosave all read the committed doc).
+    expect(effect).toMatch(/if \(next !== docRef\.current\) commit\(next\);/);
   });
 });

@@ -70,3 +70,27 @@ Results (from `web/` in the worktree):
 - No browser run (port 3000 belongs to the manager's test server). The manager should re-run the repro at
   `/notes/<id>`: rail Rename on the open note → title field and tab title update at once → a body edit keeps the new
   title in the rail after reload. Also worth one check: Rename while the title field has unsaved typing keeps the typing.
+
+## Addendum — manager's mutation gap (2026-11-04)
+
+The manager replaced `    if (next !== docRef.current) commit(next);` with `    void next;` and all 5 tests still passed.
+The old wiring test only searched the whole file for the `adoptStoredTitle(...)` call and the dependency list, so
+nothing checked that the effect actually commits the adopted doc.
+
+Fix (test only, `note-editor.rename.test.ts`): the wiring test now cuts out the effect itself. It runs from
+`const seenTitle = useRef(note.title);` to the first `}, [note.title, commit]);` after it. Inside that block it asserts:
+`useEffect(() => {`, `const next = adoptStoredTitle(docRef.current, seenTitle.current, note.title);`,
+`seenTitle.current = note.title;` and `if (next !== docRef.current) commit(next);`. `note-editor.tsx` is unchanged.
+
+Mutations (each restored from a byte copy, sha256 of `note-editor.tsx` before = after every restore =
+`2c334c108384798a2d2aa108fca6a0a956430d6b4016c2b8beba784cb9aa5e0d`):
+- M1 (manager's exact one): `commit(next)` line → `    void next;` — red, 1 failed / 4 passed
+  (`expected 'const seenTitle = useRef(note.title);…' to match /if \(next !== docRef\.current\) commi…/`).
+- M2: delete `    seenTitle.current = note.title;` — red, 1 failed / 4 passed
+  (`… to match /seenTitle\.current = note\.title;/`).
+
+After restore: the new test passed 5/5 in 3 runs. `src/components/notes` + `src/store` passed (70 files, 1303 tests).
+`tsc --noEmit --incremental false` exited 0, and eslint on both files exited 0.
+
+Limit: with no DOM test runtime (no jsdom/happy-dom/testing-library, no new dependencies allowed), the wiring is
+guarded by reading the source text, not by running the effect. A browser re-run of the repro is still the real check.
