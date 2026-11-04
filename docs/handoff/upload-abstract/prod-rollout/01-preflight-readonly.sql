@@ -25,6 +25,12 @@
 --   apply_wait.long_running_client_transactions > 0
 --                         -> wait 2-3 minutes and re-run 01; do not apply while an
 --                            old transaction could hold briefing_deliveries.
+--   apply_wait.other_sessions_holding_locks_on_*
+--                         -> informational. The bundle takes ACCESS EXCLUSIVE on
+--                            briefing_deliveries and SHARE ROW EXCLUSIVE on auth.users
+--                            (its 7 new foreign keys to auth.users) until COMMIT, so
+--                            sign-up/sign-in writes wait for the apply; pick a quiet
+--                            minute (RUNBOOK.md D4 and E2a).
 --   deploy_decisions.*    -> do NOT block the database apply (old code ignores the
 --                            new objects), but each non-zero count BLOCKS the Vercel
 --                            deploy until the user decides: such accounts would get
@@ -32,6 +38,10 @@
 --                            seed_pool_resolve returns "unavailable" for an owner
 --                            with no profile row or an unusable timezone
 --                            (bundle lines 554-555, 565-566; web/src/app/api/feed/route.ts:288-289,85-89).
+--                            The timezone count is an UPPER BOUND: it accepts zone
+--                            names and abbreviations case-insensitively, but AT TIME
+--                            ZONE also accepts POSIX-style specs (e.g. 'UTC+5'), which
+--                            it still counts. It never under-counts.
 --   export_copies.*       -> save the cell, split it (RUNBOOK.md step D3) and compare
 --                            with %TEMP%\peer-rollout-evidence\production-*.json.
 --                            Every compared category must match; postgres_version is
@@ -289,6 +299,8 @@ apply_wait AS (
           AND state IS DISTINCT FROM 'idle' AND xact_start < now() - interval '60 seconds'),
     'other_sessions_holding_locks_on_briefing_deliveries', (SELECT count(DISTINCT l.pid) FROM pg_locks l
         WHERE l.relation = 'public.briefing_deliveries'::regclass AND l.pid <> pg_backend_pid() AND l.granted),
+    'other_sessions_holding_locks_on_auth_users', (SELECT count(DISTINCT l.pid) FROM pg_locks l
+        WHERE l.relation = 'auth.users'::regclass AND l.pid <> pg_backend_pid() AND l.granted),
     'note', 'pg_stat_activity shows other roles'' sessions only if postgres may read them; a 0 is best-effort, not proof'
   ) AS j),
 deploy_decisions AS (
@@ -297,7 +309,9 @@ deploy_decisions AS (
         WHERE NOT EXISTS (SELECT 1 FROM public.profiles p WHERE p.user_id = u.id)),
     'profiles_with_timezone_unknown_to_postgres', (SELECT count(*) FROM public.profiles p
         WHERE nullif(p.digest_timezone, '') IS NOT NULL
-          AND NOT EXISTS (SELECT 1 FROM pg_timezone_names z WHERE z.name = p.digest_timezone)),
+          AND NOT EXISTS (SELECT 1 FROM pg_timezone_names z WHERE lower(z.name) = lower(p.digest_timezone))
+          AND NOT EXISTS (SELECT 1 FROM pg_timezone_abbrevs a WHERE lower(a.abbrev) = lower(p.digest_timezone))),
+    'timezone_count_is_upper_bound', 'matches zone names and abbreviations case-insensitively; AT TIME ZONE also accepts POSIX-style specs, which this count still includes, so it can over-count but never under-count',
     'meaning', 'each non-zero count = accounts whose signed-in /api/feed would answer 503 under the new code once the schema exists; decide before the Vercel deploy'
   ) AS j),
 counts AS (
