@@ -112,15 +112,62 @@ function isAcceptableCandidate(label: string): boolean {
 // dedupe" without counting any occurrence twice. The trimmed phrase still
 // faces every other gate (a single word must be a known domain term), and no
 // score or weight changes. A verb inside a phrase ("density affects water")
-// is outside this rule.
+// is R-C3b's rule, below.
 // Exported for R-C18 (W11): a seed reason never quotes a phrase holding one of these words anywhere.
+// R-C3b (W20) added the finite verbs on the last two lines: verb-only forms common in abstract prose,
+// never a noun spelling ("reaches", "remains", "yields", "leads", "drives", "controls" stay out).
 export const PHRASE_BOUNDARY_WORDS: ReadonlySet<string> = new Set(("affects affect affected using used shows show is are was were " +
-  "of for with and the a an to in on after under than how").split(" "));
+  "of for with and the a an to in on after under than how " +
+  "reduces reduce enhances enhance determines determine promotes promote inhibits inhibit suppresses suppress " +
+  "regulates regulate mediates mediate governs govern retains retain maintains maintain contains contain " +
+  "depends depend differs differ occurs occur exceeds exceed outperforms outperform explains explain reveals reveal " +
+  "indicates indicate suggests suggest provides provide requires require").split(" "));
 const BOUNDARY_WORDS = PHRASE_BOUNDARY_WORDS;
 
 function endsOnFunctionWord(label: string): boolean {
   const tokens = label.split(" ");
   return BOUNDARY_WORDS.has(tokens[0]) || BOUNDARY_WORDS.has(tokens[tokens.length - 1]);
+}
+
+// R-C3b (W20, 2026-11-04): no facet label holds a verb. R-P1 trims the edges;
+// this drops a phrase with a verb anywhere in it: a word from the list above
+// ("density affects water", "retention after rain"), or a past participle
+// ("-ed") after the first word, where it reads as the verb of the words
+// before it ("denser foliage retained", "concentration maintained capacity").
+// As with R-P1 this is a filter, never an edit: every shorter n-gram of the
+// same occurrences ("denser foliage", "electrolyte concentration") is already
+// a candidate with at least the same count, so dropping the verb-holding form
+// splits it at the verb without inventing a word, and the pieces still face
+// every other gate. A first-word participle is an adjective ("doped cathode",
+// "supervised learning") and stays; so does a hyphenated compound
+// ("nitrogen-doped"), which is one token. "-ing" is not judged by its shape:
+// after a noun it is almost always a known term ("machine learning", "remote
+// sensing", "electrochemical cycling"), so only a listed "-ing" verb counts.
+// A known term whose later word only looks like a participle is kept by the
+// explicit list below (its adjacent word pairs are exempt), with a test.
+export const KNOWN_PARTICIPLE_TERMS: readonly string[] = [
+  "machine learning", "deep learning", "remote sensing", "boundary layer",
+  "surface enhanced raman", "plasma enhanced", "laser induced", "light induced", "drug induced", "stress induced",
+  "time resolved", "angle resolved", "self assembled", "self supervised", "semi supervised", "weakly supervised",
+  "fully connected", "computer aided", "physics informed", "fiber reinforced", "highly ordered",
+  "nitrogen doped", "fluorine doped", "boron doped", "carbon coated", "glucose stimulated",
+];
+const KNOWN_TERM_PAIRS = new Set(KNOWN_PARTICIPLE_TERMS.flatMap((term) => {
+  const words = term.split(" ");
+  return words.slice(1).map((word, i) => `${words[i]} ${word}`);
+}));
+// Words ending in "-ed" that are not participles.
+const NOT_PARTICIPLE = new Set(["infrared", "hundred", "kindred", "sacred", "naked", "wicked", "rugged", "jagged", "ragged", "crooked", "beloved", "embed"]);
+
+function isParticipleShaped(token: string): boolean {
+  return token.length >= 5 && token.endsWith("ed") && !token.endsWith("eed") && !token.includes("-") && !NOT_PARTICIPLE.has(token);
+}
+
+/** R-C3b: true when a phrase holds a verb anywhere (see above). */
+export function holdsVerb(label: string): boolean {
+  const tokens = label.split(" ");
+  return tokens.some((token, i) => BOUNDARY_WORDS.has(token)
+    || (i > 0 && isParticipleShaped(token) && !KNOWN_TERM_PAIRS.has(`${tokens[i - 1]} ${token}`)));
 }
 
 // 9-21: rule-based facet classification (handoff §4.1's method/material/topic
@@ -184,7 +231,7 @@ export function extractUploadConcepts(doc: ExtractedDocument): PreferenceConcept
     }
   }
   const ranked = [...candidates].filter(([label, c]) => label.length <= 70 && (c.title || c.count >= 2))
-    .filter(([label]) => isAcceptableCandidate(label) && !endsOnFunctionWord(label))
+    .filter(([label]) => isAcceptableCandidate(label) && !endsOnFunctionWord(label) && !holdsVerb(label))
     .sort((a, b) => b[1].score - a[1].score || a[0].localeCompare(b[0]));
   const out: PreferenceConcept[] = [];
   for (const [label, c] of ranked) {

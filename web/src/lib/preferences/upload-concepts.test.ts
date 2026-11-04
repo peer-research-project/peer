@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ExtractedDocument } from "@/lib/papers/html-text";
-import { extractUploadConcepts, matchUploadedPaper, UPLOAD_CONCEPT_EXTRACTION_VERSION } from "./upload-concepts";
+import { extractUploadConcepts, holdsVerb, KNOWN_PARTICIPLE_TERMS, matchUploadedPaper, PHRASE_BOUNDARY_WORDS, UPLOAD_CONCEPT_EXTRACTION_VERSION } from "./upload-concepts";
 import { applyUploadPreferenceSignal, applyPreferenceSignal, cleanPreferenceLedger, removeUploadPreferenceSignal, summarizePreferenceLedger, scorePreferenceMatch, prepareLedger } from "./ledger";
 import { compileSearchBrief } from "@/lib/feed/profile-compiler";
 import { derivePoolCacheKey } from "@/lib/opportunities/pool-cache";
@@ -314,5 +314,52 @@ describe("R-C3 method recognition beyond materials science", () => {
 
   it("leaves the extraction version at 14 (manager ruling: cue lists only)", () => {
     expect(UPLOAD_CONCEPT_EXTRACTION_VERSION).toBe(14);
+  });
+});
+
+// W20 R-C3b (Round-2 scorecard C3): R-P1 trims only a phrase's edges, so the
+// Profile seed card still printed topics with a verb inside ("density affects
+// water", "denser foliage retained", "concentration maintained capacity").
+// No facet label may hold a verb anywhere; the noun-phrase pieces around it
+// stay, and a known term whose later word only looks like a participle is
+// kept. Invented text shaped like the fictional hosted fixtures.
+describe("R-C3b no facet label holds a verb (W20)", () => {
+  // Independent of the module: the R-P1/R-C18 list, and a past participle after the first word.
+  const LISTED = new Set("affects affect affected after reduces maintains retains".split(" "));
+  const verbInside = (label: string) => label.split(" ").some((word, i) => LISTED.has(word) || (i > 0 && /^[a-z]{3,}[^e]ed$/.test(word)));
+  const body = (text: string): ExtractedDocument => ({ title: "", source: "pdf", figureCaptions: [], sections: [{ id: "s0", heading: "Body", canonical: "body", text: `${text} `.repeat(4) }] });
+  const canopy = body("The question is how leaf canopy density affects water retention after rain. In this example denser foliage retained water for longer.");
+  const battery = body("The question is how electrolyte concentration affects cycling stability. In this example one concentration maintained capacity for more cycles. Grazing pressure reduces plant cover.");
+
+  it("drops every phrase with a verb inside and keeps the noun phrases around it", () => {
+    const labels = [...extractUploadConcepts(canopy), ...extractUploadConcepts(battery)].map((c) => c.label);
+    for (const label of labels) expect(verbInside(label), label).toBe(false);
+    for (const fragment of ["density affects water", "denser foliage retained", "foliage retained water", "retention after rain",
+      "concentration affects cycling", "concentration maintained capacity", "pressure reduces plant"]) expect(labels).not.toContain(fragment);
+    expect(labels).toEqual(expect.arrayContaining(["leaf canopy density", "water retention", "electrolyte concentration", "cycling stability", "grazing pressure", "plant cover"]));
+  });
+
+  it("never invents a word: every label is a run of words from the text", () => {
+    for (const doc of [canopy, battery]) {
+      const text = ` ${doc.sections[0].text.toLowerCase().replace(/[^a-z\s]/g, " ").replace(/\s+/g, " ")} `;
+      for (const { label } of extractUploadConcepts(doc)) expect(text.includes(` ${label} `), label).toBe(true);
+    }
+  });
+
+  it("keeps known terms and adjective participles", () => {
+    const labels = [
+      ...extractUploadConcepts(body("Machine learning and deep learning. Remote sensing of the boundary layer. Layered oxide cathodes.")),
+      ...extractUploadConcepts(body("Time resolved spectroscopy of nitrogen doped graphene. Highly ordered pyrolytic graphite. Near infrared spectra.")),
+    ].map((c) => c.label);
+    expect(labels).toEqual(expect.arrayContaining(["machine learning", "deep learning", "remote sensing", "boundary layer", "layered oxide cathodes",
+      "time resolved spectroscopy", "nitrogen doped graphene", "highly ordered pyrolytic", "near infrared spectra"]));
+  });
+
+  it("judges a phrase the same way the extractor does", () => {
+    for (const label of ["density affects water", "denser foliage retained", "concentration maintained capacity", "retention after rain", "pressure reduces plant"]) expect(holdsVerb(label), label).toBe(true);
+    for (const label of ["machine learning", "remote sensing data", "boundary layer", "time resolved spectroscopy", "surface enhanced raman", "nitrogen-doped graphene",
+      "near infrared spectra", "doped cathode", "maintained capacity", "particle speed", "electrochemical cycling"]) expect(holdsVerb(label), label).toBe(false);
+    for (const term of KNOWN_PARTICIPLE_TERMS) expect(holdsVerb(term), term).toBe(false);
+    for (const word of PHRASE_BOUNDARY_WORDS) expect(holdsVerb(`canopy ${word} water`), word).toBe(true);
   });
 });
