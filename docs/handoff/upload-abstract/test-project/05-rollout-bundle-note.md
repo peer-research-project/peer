@@ -3,7 +3,7 @@
 The rehearsal step is: run the **exact** canonical bundle, unmodified, in the SQL Editor of the peer-test project (ref `cbsbtkvbmvyznerbpmxg`), immediately after `00-test-target-guard.sql` passed in that same project.
 
 - File: `docs/handoff/upload-abstract/sql-runtime/seed-closure-canonical-lf.sql`
-- SHA-256: `A7878BF3A92587B653159604AED6DF0F959207A9C36958E686729EB215120A1B (R-C11 bundle, 2026-11-04; supersedes F1D16D…5745A)`, 63045 bytes, LF only, 604 non-ASCII bytes (UTF-8 box-drawing characters in comments).
+- SHA-256: `A7878BF3A92587B653159604AED6DF0F959207A9C36958E686729EB215120A1B (R-C11 bundle, 2026-11-04; supersedes F1D16D…5745A)`, 63968 bytes, LF only, 604 non-ASCII bytes (UTF-8 box-drawing characters in comments).
 - It carries its own `BEGIN;` … `COMMIT;`. Do not add, remove or reformat anything, and do not prepend the guard to it: the guard is a separate run.
 - Contents, in order: `20260924000000_dashboard_delivery_ledger.sql`, `20260924000300_briefing_deliveries_dedupe.sql`, `20260924000500_dashboard_rollover.sql`, `20261102000000_seed_pool.sql` (corrected, commit `93673ab4`).
 
