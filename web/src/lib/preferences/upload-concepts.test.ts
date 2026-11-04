@@ -275,3 +275,44 @@ describe("R-P1 phrases never start or end on a verb-like or function word", () =
     for (const label of labels) expect(edge(label), label).toBe(false);
   });
 });
+
+// W11 R-C3 (Round-1 scorecard C3): object/method recognition is not
+// materials-science-only. Invented sentences from five other fields; each
+// names its method, so at least one phrase per text must come out as a
+// "method" facet (rule-based cues only — no model, no taxonomy lookup).
+describe("R-C3 method recognition beyond materials science", () => {
+  const body = (text: string): ExtractedDocument => ({
+    title: "", source: "pdf", figureCaptions: [],
+    sections: [{ id: "s0", heading: "Body", canonical: "body", text: `${text} `.repeat(2) }],
+  });
+  const cases: [string, string[]][] = [
+    ["We measured turbidity with acoustic doppler profilers and sediment traps.", ["acoustic doppler profilers"]],
+    ["We measured bleaching using underwater photogrammetry and temperature loggers.", ["underwater photogrammetry", "temperature loggers"]],
+    ["We measured queue length using loop detectors and microsimulation.", ["loop detectors"]],
+    ["We measured nitrate flux using isotope tracing and gas chromatography.", ["isotope tracing", "gas chromatography"]],
+    ["We measured leaf area and canopy moisture using optical imaging and field sensors.", ["optical imaging", "field sensors"]],
+  ];
+
+  for (const [sentence, methods] of cases) {
+    it(`recognizes the method in "${sentence}"`, () => {
+      const concepts = extractUploadConcepts(body(sentence));
+      const methodLabels = concepts.filter((c) => c.facet === "method").map((c) => c.label);
+      expect(methodLabels.length, sentence).toBeGreaterThan(0);
+      expect(methodLabels).toEqual(expect.arrayContaining(methods));
+    });
+  }
+
+  it("keeps what was measured out of the method facet", () => {
+    const facet = (sentence: string, label: string) => extractUploadConcepts(body(sentence)).find((c) => c.label === label)?.facet;
+    expect(facet(cases[2][0], "queue length")).toBe("topic");
+    expect(facet(cases[4][0], "leaf area")).toBe("topic");
+    expect(facet(cases[4][0], "canopy moisture")).toBe("topic");
+    // An object cue: the thing the method was applied to, not the method.
+    expect(facet(cases[0][0], "sediment traps")).toBe("material");
+    expect(facet(cases[3][0], "nitrate flux")).toBe("material");
+  });
+
+  it("leaves the extraction version at 14 (manager ruling: cue lists only)", () => {
+    expect(UPLOAD_CONCEPT_EXTRACTION_VERSION).toBe(14);
+  });
+});

@@ -128,10 +128,18 @@ const METHOD_CUES = new Set([
   "synthesis", "model", "algorithm", "benchmark", "dataset", "chromatography",
   "voltammetry", "calorimetry", "titration", "regression", "embedding",
   "embeddings", "network", "imaging", "transform",
+  // R-C3 (W11, 2026-11-04): a small, explicit set of domain-general
+  // measurement and survey methods (field, social, transport, ecology), so
+  // method recognition is not materials-science-only. Still a closed list.
+  "photogrammetry", "sensor", "sensors", "survey", "surveys", "interview",
+  "interviews", "tracing", "profiler", "profilers", "microsimulation",
+  "detector", "detectors", "logger", "loggers", "measurement", "measurements",
 ]);
 const MATERIAL_CUES = new Set([
   "alloy", "oxide", "perovskite", "electrolyte", "composite", "polymer",
   "ceramic", "catalyst", "cathode", "anode", "nanoparticle", "nanoparticles",
+  // R-C3 (W11): a few domain-general studied substances outside materials science.
+  "sediment", "sediments", "soil", "soils", "groundwater", "biomass", "tissue",
 ]);
 // "-ide"/"-ate"/"-ite" suffix cue, guarded by a length floor so short,
 // unrelated words ("site", "quite") don't false-positive into "material".
