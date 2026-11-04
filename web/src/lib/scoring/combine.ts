@@ -19,7 +19,7 @@ import { scoreSource } from "./source-weight";
 import { generateReason } from "./reason";
 import { shouldPushReviewPaper } from "./review-policy";
 import { normalizePhrase, tokenizeFolded } from "./tokenize";
-import { admitsBySeed, hasUsableSeed, mixSeedScore, strongestSeedMatches, type MatchingSeed, type SeedMatch } from "@/lib/seed-pool/scoring";
+import { admitsBySeed, hasUsableSeed, mixSeedScore, seedBlendWeights, strongestSeedMatches, type MatchingSeed, type SeedMatch } from "@/lib/seed-pool/scoring";
 import { canonicalize, termSpecificity } from "./term-expand";
 import {
   buildPreferenceDocumentFrequency,
@@ -405,9 +405,15 @@ export function scoreItems(
     const explicit = explicitFeedback ? scorePreferenceMatch(item, explicitFeedback, mustTopics, {
       now, documentFrequency: preferenceDocumentFrequency, corpusSize: items.length,
     }) : null;
+    // R-C7: intent enters the seed blend on the same pool-relative scale
+    // (`tp`, the topicality percentile) the no-seed ranking uses, not the raw
+    // cosine `tf`, whose ceiling (~0.6) would quietly shrink intent's 35%.
+    const seedIntent = ((kw.score + tp) / 2) * senseContextPenalty;
+    const seedFeedback = explicit ? clamp01(explicit.boost / 0.18) : null;
+    const seedRecencySource = (rc + sr) / 2;
+    const blended = seedEnabled ? mixSeedScore(seedMatches[0]?.score ?? 0, seedIntent, seedFeedback, seedRecencySource) : 0;
     const combined = seedEnabled
-      ? mixSeedScore(seedMatches[0]?.score ?? 0, ((kw.score + tf) / 2) * senseContextPenalty,
-          explicit ? clamp01(explicit.boost / 0.18) : null, (rc + sr) / 2) * preference.penalty
+      ? blended * preference.penalty
       : clamp01(base * preference.penalty * senseContextPenalty + softBonus + preference.boost);
     const breakdown: ScoreBreakdown = {
       keyword: kw.score,
@@ -416,6 +422,16 @@ export function scoreItems(
       recency: rc,
       source: sr,
       combined,
+      ...(seedEnabled ? { seedBlend: {
+        seed: clamp01(seedMatches[0]?.score ?? 0),
+        intent: clamp01(seedIntent),
+        feedback: seedFeedback,
+        recencySource: clamp01(seedRecencySource),
+        weights: seedBlendWeights(seedFeedback),
+        blended,
+        preferencePenalty: preference.penalty,
+        seedFacets: [...new Set((seedMatches[0]?.hits ?? []).map((hit) => hit.facet))],
+      } } : {}),
     };
     scored.push({
       ...item,

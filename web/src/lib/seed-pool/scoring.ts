@@ -77,10 +77,19 @@ export function admitsBySeed(match: SeedMatch | undefined): boolean {
     || new Set(match.hits.map((hit) => hit.facet)).size >= 2;
 }
 
+export interface SeedBlendWeights { seed: number; intent: number; feedback: number; recencySource: number }
+/** 40/35/15/10; with no feedback history its 15 returns to intent (50). */
+export function seedBlendWeights(feedback: number | null): SeedBlendWeights {
+  return feedback === null
+    ? { seed: 0.4, intent: 0.5, feedback: 0, recencySource: 0.1 }
+    : { seed: 0.4, intent: 0.35, feedback: 0.15, recencySource: 0.1 };
+}
+
 /** Comparable, separately calculated components; feedback null means no feedback history. */
 export function mixSeedScore(seed: number, intent: number, feedback: number | null, recencySource: number): number {
-  return clamp(0.4 * clamp(seed) + (feedback === null ? 0.5 : 0.35) * clamp(intent)
-    + (feedback === null ? 0 : 0.15 * clamp(feedback)) + 0.1 * clamp(recencySource));
+  const w = seedBlendWeights(feedback);
+  return clamp(w.seed * clamp(seed) + w.intent * clamp(intent)
+    + (feedback === null ? 0 : w.feedback * clamp(feedback)) + w.recencySource * clamp(recencySource));
 }
 
 /** Promote a different genuinely matched seed only within a small score band. */

@@ -39,7 +39,7 @@ it("caps one first author at two of the seeded top slots, like the no-seed path"
 it("keeps the preferred-journal boost for a seeded user", async () => {
   const pool = [
     item("plain", "Glacier meltwater in a moraine lake by dye tracing", "Dr. Invented A"),
-    item("journal", "Glacier meltwater storage in a moraine lake", "Dr. Invented B", "Journal of Invented Glaciology"),
+    item("journal", "Glacier meltwater in a moraine lake by boat sampling", "Dr. Invented B", "Journal of Invented Glaciology"),
   ];
   const without = await run(pool);
   expect(without.items.map((i) => i.id)).toEqual(["plain", "journal"]);
