@@ -17,6 +17,19 @@ Every license listed here is compatible with AGPL-3.0-only as checked on 2026-10
 
 ## Code adapted from other projects
 
+### Supabase Auth — local SQL validation fixture
+
+The test-only `docs/handoff/upload-abstract/sql-runtime/auth-uid-exact.sql`
+reproduces the deployed `auth.uid()` helper for isolated database validation.
+Its claim lookup corresponds to Supabase Auth's
+[`20220224000811_update_auth_functions.up.sql`](https://github.com/supabase/auth/blob/master/migrations/20220224000811_update_auth_functions.up.sql).
+No production user rows, credentials, Auth server or PostgreSQL binaries are included.
+
+- License: [MIT](https://github.com/supabase/auth/blob/master/LICENSE), verified 2026-11-03.
+- Copyright (c) 2021-2025 Supabase <support@supabase.com>.
+- The MIT permission and warranty notice reproduced in the DeerFlow entry below
+  also applies to this helper, with the Supabase copyright above.
+
 ### DeerFlow
 
 Peer includes code and implementation patterns adapted from the MIT-licensed

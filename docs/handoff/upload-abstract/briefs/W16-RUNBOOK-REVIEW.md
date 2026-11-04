@@ -1,0 +1,15 @@
+# Brief W16-RUNBOOK-REVIEW (Group 1, A: independent review of the W14 production rollout kit) — 2026-11-04
+
+Repo: C:/I/Personal/Github - start up project/Peer, branch fixing-bugs-on-uploading-pdf-and-abstract-reading (HEAD 2c0437c3 or later). READ-ONLY role: do not edit, commit, push, branch, start servers, or touch any database / Vercel / Supabase. Never read web/.env.local or web/.env.peer-test.local. Scratch only in C:/Users/wbc13/AppData/Local/Temp/peer-claude-w16/.
+
+Subject: docs/handoff/upload-abstract/prod-rollout/ (00-production-guard.sql, 01-preflight-readonly.sql, 02-rollback.sql, 03-post-apply-readonly.sql, RUNBOOK.md), written by W14 without database access. Canonical bundle: docs/handoff/upload-abstract/ (find the seed migration bundle whose LF SHA-256 is A7878BF3A92587B653159604AED6DF0F959207A9C36958E686729EB215120A1B, 63968 bytes). Production metadata exports (read-only JSON) in C:/Users/wbc13/AppData/Local/Temp/peer-rollout-evidence/ (production-*-metadata.json, production-inventory-readonly.json). Test-project guards/verifiers: docs/handoff/upload-abstract/test-project/00–09.
+
+Check, citing file:line for every finding:
+1. Read-only claims: 00, 01, 03 contain no DML/DDL that can change state (no INSERT/UPDATE/DELETE/CREATE/ALTER/DROP/GRANT/REVOKE/COMMIT outside string literals; no volatile side-effect functions such as pg_terminate_backend, set_config with is_local=false, nextval).
+2. 02-rollback.sql: defaults to dry run; the dry-run path cannot commit; the drop list equals exactly what the bundle creates (19 functions, 7 tables, the local_date index, 3 added columns on briefing_deliveries) — diff against the bundle's CREATE/ALTER statements; the original 8 columns and rows are kept; refusal conditions are checked BEFORE any drop; `peer-test-rehearsal` cannot execute.
+3. 00 guard: refuses on peer-test (peer_test_guard schema present) and accepts on production per the exported metadata (ledger versions, bucket limit, tables). Compare literals against the export JSON.
+4. 01 literals match the exports (spot-check at least 10 literals across inventory, policies, ACL, sequence).
+5. RUNBOOK compatibility argument ("database first, then deploy; the live build 902eb50 never touches bundle objects while the rollout flags are unset"): verify each cited line in `git show 902eb50:<path>` and in the bundle. Name any path the argument missed (any route/cron in 902eb50 that would touch briefing_deliveries or changed functions differently after the bundle).
+6. Anything that would make D0 (the peer-test rehearsal: 00 must REFUSE, 01 and 03 body-only, 02 forced dry run) unsafe or impossible to run in the Supabase SQL editor (e.g. statements the editor splits, psql meta-commands, size).
+
+Cost each defect: 1.0 would cause data loss/wrong apply or an unrunnable step; 0.5 misleading; 0.25 cosmetic. Output: a committed-nothing report written to C:/Users/wbc13/AppData/Local/Temp/peer-claude-w16/W16-report.md, and your final reply: one paragraph verdict (GO / GO-with-fixes / NO-GO for D0) + a findings table (id, file:line, cost, fix).

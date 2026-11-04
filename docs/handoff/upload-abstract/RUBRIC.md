@@ -33,7 +33,7 @@ Each unit is1. PASS count is number fully satisfied. Defect cost: unusable1.0; m
 6. Unavailable/error state explains and allows retry.
 7. Storage auth/private ownership/size/signed access remain enforced.
 8. Adjacent global `notes` opens existing notes collection.
-9. Collection includes all prior notes, preserves persistence/search/edit/archive.
+9. Collection includes all prior notes and preserves persistence, search, edit and the existing note actions (rename, duplicate, export and delete). Archive is conditional on an existing implementation; none was found in the original Notes model/UI (manager ruling24).
 10. Existing note creation remains reachable; collection is not a blank new-note editor.
 11. Desktop rendered path is clear and usable.
 12. Mobile rendered path is clear and usable.

@@ -2,7 +2,9 @@
 
 Branch: `fixing-bugs-on-uploading-pdf-and-abstract-reading`.
 
-This is an operational handoff. The latest human instruction explicitly authorizes creating a PR and then merging it. Root pushed the approved branch and created [PR40](https://github.com/peer-research-project/peer/pull/40), and owns exact-head rechecks and the merge. This checkpoint does not assert that merge or deployment has completed and does not authorize production SQL. Local verification remains recorded in `ABC-UPLOAD-ABSTRACT-REPAIR.md` and `EVIDENCE-INDEX.md`; the97.9-per-theme, two-independent-round acceptance gate remains open.
+PR40 merged at2026-11-03T16:26:14Z into main`9ce33c16fd1a95d1a1e24b43a1dfb2c0cd3eccf2`; merge is verified, production deployment is not. The human subsequently authorized test-environment validation FIRST, then production migration/deployment and all remaining acceptance. That conditional production authority already exists; do not ask again after its test conditions truly pass. The human also requires fixing all51full-suite failures and1lint error, not accepting them as baseline. See the living `HANDOFF-CLAUDE-PEER-ROLLOUT.md` for current units/evidence;97.9-per-theme/two-independent-round acceptance remains OPEN.
+
+Two retained worker groups are active: full minimal migration/runtime validation and full test/lint repairs. Root exclusively owns live Vercel/Supabase/browser/external mutations and coordinates follow-up source publication. No duplicate PR40/merge, unauthorized new branch, app dependency or worker push. Preserve the dirty handoff documents and all failed evidence.
 
 ## Upload configuration already prepared
 
@@ -21,18 +23,23 @@ The repaired UI keeps the global upload action and paper attachment action visib
 
 ## Database change to validate
 
-Reviewable source: `web/supabase/migrations/20261102000000_seed_pool.sql`.
+Actual production metadata lacks dashboard batches/deliveries/rollover tables, both prerequisite RPCs and`briefing_deliveries.local_date`. **Seed SQL alone is NO-GO** (real isolated transaction reproduced missing-table failure and rollback). Required tested closure, in order:
 
-The migration has not been executed. It builds on the existing Peer Supabase schema, including profiles, dashboard batches and delivery tables/functions. Validate it against the matching existing schema in a non-production environment before considering production application. SQL-text tests and mocked RPCs do not establish syntax, RLS isolation, transaction locking or concurrent-edit behavior.
+1. `20260924000000_dashboard_delivery_ledger.sql`
+2. `20260924000300_briefing_deliveries_dedupe.sql`
+3. `20260924000500_dashboard_rollover.sql`
+4. Corrected `20261102000000_seed_pool.sql`
+
+Real isolated PostgreSQL17.11 tests have applied/reapplied this closure to a metadata-shaped baseline, preserving duplicate historical NULL-date deliveries and exercising permissions/lifecycle/date/real locks. A real duplicate-claim failure led to local fix93673ab4 in the new seed migration; the PR40 seed SQL is therefore not the rollout payload. Raw corrected worktree SHA1DF1C5C65BF78B5F827069D9C96203373255BB4EA7B88FAFBB64E0B84E20F30D is not yet final GO: sequence/creator-capability parity, canonical LF payload hash, manager replay and coordinated publication remain pending. No production DDL has run. Auth/storage/email platform proof remains separate.
 
 With the seed schema explicitly absent, existing feed, email and prepared-job paths retain legacy no-seed behavior. The seed editor reports that seed papers are unavailable and permits retry. A general database outage is an error; it must not be treated as an empty seed pool.
 
 ## Remaining rollout order
 
-1. Root commits/pushes the bounded handoff update, rechecks PR40 at the exact head and completes the human-authorized merge while preserving owner history. Record the actual merge result; no implementation or broad test rerun is part of this operational update.
-2. Observe and record any existing CI/CD deployment outcome. A successful merge does not establish deployment success or product acceptance. With the seed schema explicitly absent, the no-seed fallback and unavailable seed editor described above still apply.
-3. Validate the migration on an authorized existing-schema non-production database. Exercise two-owner isolation, stale revisions, concurrent edits, first-briefing protection, next-owner-local-day activation, DST, future prepared jobs and forget/cleanup fences. This has not run.
-4. Obtain separate explicit owner authorization before production SQL application or a manual production deployment. Then apply the validated migration to the intended target using its normal migration process. PR40 authorization does not supply this SQL permission.
+1. Finish all test/lint repairs, manager verification and source publication coordinated by root; do not publish old SQL or silently weaken assertions.
+2. Complete production-metadata/security/sequence parity and exact canonical four-file replay with invented users, retained history and all delivery/forget races; record each SQL SHA and explicit GO/NO-GO.
+3. Verify isolated app/deployment preflight and target identity. Preview must not inherit production Supabase credentials for test writes. Record any existing CI/CD outcome separately; merge alone is not deployment.
+4. After test conditions pass, root executes the already-authorized production deployment/migration in a reviewed order. Prefer verified new code with missing-schema fallback before revoking legacy RPC access, and handle any old-worker compatibility window. No production-data deletion or unrelated migrations. Do not ask for the same conditional permission again.
 5. Verify the actual deployed product with authenticated test accounts and invented/public PDFs: global upload, attaching a PDF to a paper, reading extracted text, Notes persistence, seed upload/edit/undo, owner separation, owner-date web/email/prepared parity and explicit forget. These hosted gates remain unrun. Exercise Deep Report only with that user's authorized model key; never substitute a site-operator model key.
 
 Record real outcomes separately from fixtures. Failed and unrun checks remain visible; deployment alone does not close acceptance.
