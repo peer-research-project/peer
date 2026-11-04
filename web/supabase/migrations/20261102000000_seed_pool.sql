@@ -79,7 +79,7 @@ end $$;
 
 create or replace function public.seed_pool_apply(p_owner_id uuid, p_expected_revision bigint, p_seed_ids uuid[], p_undo boolean default false)
 returns jsonb language plpgsql security definer set search_path = public, pg_temp as $$
-declare v_zone text; v_today date; v_state public.seed_pool_state%rowtype; v_target date; v_version uuid; v_seeds jsonb; v_count integer; v_distinct integer; v_hashes integer; v_active boolean; v_served boolean;
+declare v_zone text; v_today date; v_state public.seed_pool_state%rowtype; v_target date; v_version uuid; v_seeds jsonb; v_count integer; v_distinct integer; v_hashes integer; v_active boolean; v_served boolean; v_last date;
 begin
   perform pg_advisory_xact_lock(hashtextextended(p_owner_id::text, 725113));
   select coalesce(nullif(digest_timezone,''),'UTC') into v_zone from public.profiles where user_id=p_owner_id;
@@ -106,7 +106,16 @@ begin
     or exists(select 1 from public.briefing_deliveries where user_id=p_owner_id and
       (local_date=v_today::text or (local_date is null and (delivered_at at time zone v_zone)::date=v_today)))
     or exists(select 1 from public.seed_pool_observed_days where owner_id=p_owner_id and local_date=v_today) into v_served;
-  v_target := case when not v_active and not v_served and v_count>0 then v_today else v_today+1 end;
+  -- R-C11: a date label is the day identity whatever zone served it, so after a westward
+  -- timezone switch a label later than today may already be served. Activate strictly after
+  -- every served label; prepared batches and null legacy labels do not count.
+  select max(d) into v_last from (
+    select local_date::date as d from public.dashboard_batches where owner_id=p_owner_id and status in ('served','acknowledged')
+      and local_date ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' and pg_input_is_valid(local_date,'date')
+    union all select local_date::date from public.briefing_deliveries where user_id=p_owner_id and local_date is not null
+      and local_date ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' and pg_input_is_valid(local_date,'date')
+    union all select local_date from public.seed_pool_observed_days where owner_id=p_owner_id) as served_labels;
+  v_target := case when not v_active and not v_served and v_count>0 and (v_last is null or v_last<v_today) then v_today else greatest(v_today+1, v_last+1) end;
   if v_state.pending_version is not null and v_state.pending_effective>v_today then
     update public.seed_pool_snapshots set superseded=true where owner_id=p_owner_id and version=v_state.pending_version;
   end if;
