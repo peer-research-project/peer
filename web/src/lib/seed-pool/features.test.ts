@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ExtractedDocument } from "@/lib/papers/html-text";
-import { isSeedBoilerplate, seedFromExtractedDocument, verifiedPublicDoi } from "./features";
+import { extractUploadConcepts } from "@/lib/preferences/upload-concepts";
+import { SEED_BOILERPLATE_PHRASES, SEED_CONDITION_PHRASES, isSeedBoilerplate, seedFromExtractedDocument, verifiedPublicDoi } from "./features";
 const doc: ExtractedDocument = { title: "Fictional Sodium Cathode Study", source: "pdf", figureCaptions: [], sections: [{ id: "s0", heading: "Methods", canonical: "methods", text: "Sodium cathode materials were tested using microscopy and diffraction. ".repeat(10) }] };
 afterEach(() => vi.unstubAllGlobals());
 describe("private seed features", () => {
@@ -40,5 +41,28 @@ describe("R-C18 seed boilerplate stoplist", () => {
   it("names only the explicit stoplist and all-boilerplate labels", () => {
     for (const label of ["test data", "real experiment", "synthetic example", "this paper", "synthetic example denser", "experiment results"]) expect(isSeedBoilerplate(label)).toBe(true);
     for (const label of ["glacier meltwater", "impedance spectroscopy", "battery electrolyte stability", "synthetic aperture radar", "test bench"]) expect(isSeedBoilerplate(label)).toBe(false);
+  });
+});
+
+describe("R-C6d generic condition phrases are seed boilerplate (W21)", () => {
+  // Invented text shaped like the fictional canopy fixture's methods sentence.
+  const canopy: ExtractedDocument = { title: "Fictional Canopy Moisture Study", source: "pdf", figureCaptions: [], sections: [{ id: "s0", heading: "Methods", canonical: "methods", text: "Leaf canopy density and canopy moisture were measured under identical conditions with field sensors. Canopy moisture and leaf canopy density were compared under identical conditions. ".repeat(6) }] };
+  it("keeps 'identical conditions' out of seed facets but leaves the upload concept itself alone", () => {
+    expect(extractUploadConcepts(canopy).map((c) => c.label)).toContain("identical conditions");
+    const seed = seedFromExtractedDocument(canopy, Buffer.from("canopy-conditions"));
+    if (!seed) throw new Error("Expected a readable seed");
+    const all = [...seed.features.topic, ...seed.features.object, ...seed.features.method];
+    expect(all).not.toContain("identical conditions");
+    expect(all.join(" | ")).not.toMatch(/\bconditions\b/);
+    expect(all).toEqual(expect.arrayContaining(["leaf canopy density", "canopy moisture"]));
+  });
+  it("names exactly the closed list of five and leaves domain condition terms", () => {
+    expect([...SEED_CONDITION_PHRASES].sort()).toEqual(["different conditions", "experimental conditions", "identical conditions", "same conditions", "similar conditions"]);
+    for (const phrase of SEED_CONDITION_PHRASES) {
+      expect(SEED_BOILERPLATE_PHRASES).toContain(phrase);
+      expect(isSeedBoilerplate(phrase)).toBe(true);
+      expect(isSeedBoilerplate(`under ${phrase}`)).toBe(true);
+    }
+    for (const label of ["standard conditions", "boundary conditions", "initial conditions", "reaction conditions", "conditions", "identical twins", "canopy conditions"]) expect(isSeedBoilerplate(label)).toBe(false);
   });
 });

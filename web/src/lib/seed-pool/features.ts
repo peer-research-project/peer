@@ -40,9 +40,20 @@ export async function verifiedPublicDoi(rawDoi: string | undefined, extractedTit
  * words, never becomes a seed facet, so it can neither score nor be named in
  * a recommendation reason.
  */
+/**
+ * R-C6d (W21, 2026-11-04): generic experimental-condition phrases. "Measured
+ * under identical conditions" says how a study was run, not what it is about.
+ * A closed list, matched as whole phrases: domain terms such as "standard
+ * conditions", "boundary conditions", "initial conditions" and "reaction
+ * conditions" are not on it and stay facets.
+ */
+export const SEED_CONDITION_PHRASES: readonly string[] = [
+  "identical conditions", "same conditions", "similar conditions", "experimental conditions", "different conditions",
+];
 export const SEED_BOILERPLATE_PHRASES: readonly string[] = [
   "test data", "real experiment", "synthetic example", "this paper", "this study",
   "our results", "real data", "toy example", "example data",
+  ...SEED_CONDITION_PHRASES,
 ];
 const SEED_BOILERPLATE_WORDS = new Set([
   "test", "data", "real", "experiment", "experiments", "synthetic", "example", "examples",
