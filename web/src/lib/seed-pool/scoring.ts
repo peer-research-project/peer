@@ -25,10 +25,17 @@ export function matchSeed(candidateText: string, seed: MatchingSeed): SeedMatch 
   const candidate = new Set(tokens);
   const hits: FacetHit[] = [];
   let score = 0;
-  for (const { name, weight } of FACETS) {
+  const facets = FACETS.map(({ name, weight }) => {
     const phrases = [...new Set(seed.features[name].map((v) => v.trim()).filter(Boolean))];
-    const terms = [...new Set(phrases.flatMap(tokenizeFolded))];
+    return { name, weight, phrases, terms: [...new Set(phrases.flatMap(tokenizeFolded))] };
+  });
+  // R-C6: 50/30/20 is shared over the facets this seed actually has, the same
+  // way the missing feedback share returns to intent. A topic-only seed's
+  // topic counts in full; a seed with no facet terms contributes nothing.
+  const presentWeight = facets.reduce((sum, facet) => sum + (facet.terms.length ? facet.weight : 0), 0);
+  for (const { name, weight: absoluteWeight, phrases, terms } of facets) {
     if (!terms.length) continue;
+    const weight = absoluteWeight / presentWeight;
     const matching = terms.filter((term) => candidate.has(term));
     if (!matching.length) continue;
     const doc = (id: string, title: string): RawItem => ({ id, title, source: "openalex", authors: [], url: "", publishedAt: "", metadata: {} });

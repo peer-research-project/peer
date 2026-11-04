@@ -54,3 +54,23 @@ it("matches folded facet terms regardless of order using TF-IDF and grounds the 
   expect(matchSeed("galactic observation", battery).score).toBe(0);
   expect(matchSeed("solid lithium neutron astronomy", battery).score).toBe(0);
 });
+
+describe("R-C6 facet weights renormalized over the facets a seed has", () => {
+  const facets = (topic: string[], object: string[], method: string[]): MatchingSeed => ({ id: "r", canonicalKey: "sha256:r", features: { topic, object, method } });
+  it("lets a topic-only seed's topic count in full", () => {
+    const topicOnly = facets(["peat bog carbon"], [], []);
+    expect(matchSeed("Peat bog carbon flux in a fictional fen", topicOnly).score).toBeCloseTo(1);
+    expect(admitsBySeed(matchSeed("Peat bog carbon flux in a fictional fen", topicOnly))).toBe(true);
+  });
+  it("shares 50/20 over topic+method as 50/70 and 20/70", () => {
+    const topicMethod = facets(["peat bog carbon"], [], ["eddy covariance"]);
+    expect(matchSeed("Peat bog carbon budgets", topicMethod).score).toBeCloseTo(0.5 / 0.7);
+    expect(matchSeed("Eddy covariance towers", topicMethod).score).toBeCloseTo(0.2 / 0.7);
+    expect(matchSeed("Peat bog carbon by eddy covariance", topicMethod).score).toBeCloseTo(1);
+  });
+  it("keeps a full three-facet seed on the 50/30/20 scale and a facetless seed at zero", () => {
+    expect(matchSeed("Peat bog carbon", facets(["peat bog carbon"], ["sphagnum moss"], ["eddy covariance"])).score).toBeCloseTo(0.5);
+    expect(matchSeed("Peat bog carbon", facets([], [], [])).score).toBe(0);
+    expect(matchSeed("Peat bog carbon", facets(["  "], [], [])).score).toBe(0);
+  });
+});
