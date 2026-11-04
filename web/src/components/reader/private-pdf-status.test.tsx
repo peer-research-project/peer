@@ -117,3 +117,34 @@ describe("PrivatePdfStatus — the two actions are touch targets under hover:non
     }
   });
 });
+
+// W11 R-B6 (Round-1 scorecard B6): the "keywords inform your recommendations"
+// clause is a claim about what Peer took from this PDF. A blank / no-text-layer
+// upload (`textStatus: "empty"`) or one that yielded no extracted phrases has
+// no keywords, so the line must not say it does; the retention line stays.
+describe("PrivatePdfStatus — keyword clause only when keywords were extracted (W11 R-B6)", () => {
+  const signal = { key: "solid electrolyte", label: "solid electrolyte", source: "uploaded_article" as const };
+  const render = (p: Paper) => renderToStaticMarkup(createElement(PrivatePdfStatus, { upload: p, onDeleted: () => {} }));
+
+  it("keeps the keyword clause when the PDF had readable text and yielded keywords", () => {
+    const html = render({ ...upload, textStatus: "ok", preferenceSignals: [signal] });
+    expect(html).toContain("Private PDF · retained for 30 days after upload · keywords inform your recommendations.");
+  });
+
+  it("drops the keyword clause for a PDF with no readable text, keeping the retention line", () => {
+    const html = render({ ...upload, textStatus: "empty", preferenceSignals: [] });
+    expect(html).toContain("Private PDF · retained for 30 days after upload.");
+    expect(html).not.toContain("keywords");
+  });
+
+  it("drops the keyword clause when readable text yielded no keywords", () => {
+    const html = render({ ...upload, textStatus: "ok", preferenceSignals: [] });
+    expect(html).toContain("Private PDF · retained for 30 days after upload.");
+    expect(html).not.toContain("keywords");
+  });
+
+  it("drops the keyword clause when an empty-text record somehow still carries signals", () => {
+    const html = render({ ...upload, textStatus: "empty", preferenceSignals: [signal] });
+    expect(html).not.toContain("keywords");
+  });
+});
