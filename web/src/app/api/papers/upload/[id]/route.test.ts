@@ -208,3 +208,71 @@ describe("DELETE /api/papers/upload/[id]", () => {
     expect(body.retractEvidence).toBe(true);
   });
 });
+
+// W8 R-H1 (check 7): every answer from this route — each early refusal
+// included — must carry the full private header set, so no shared cache is
+// ever told it may keep an answer about one owner's private upload.
+describe("W8 R-H1: every response carries PRIVATE_UPLOAD_HEADERS", () => {
+  const meta: UploadMeta = {
+    hash16: "4e6f6e2d72656131",
+    fileName: "invented-fern-survey.pdf",
+    title: "An Invented Fern Survey",
+    uploadedAt: "2026-11-04T00:00:00.000Z",
+    textStatus: "ok",
+  };
+
+  function expectPrivate(res: Response) {
+    expect(res.headers.get("cache-control")).toBe("private, no-store");
+    expect(res.headers.get("vary")).toMatch(/Cookie/);
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(res.headers.get("x-robots-tag")).toBe("noindex, noarchive");
+  }
+
+  beforeEach(() => {
+    mocks.readUploadMeta.mockReset();
+    mocks.hasOtherReadyDocumentCopy.mockResolvedValue(false);
+  });
+
+  it("GET 400 for a malformed id", async () => {
+    const res = await call("not-a-hash");
+    expect(res.status).toBe(400);
+    expectPrivate(res);
+  });
+
+  it("GET 404 for an unknown or unowned id", async () => {
+    mocks.readUploadMeta.mockResolvedValueOnce(null);
+    const res = await call("4e6f6e2d72656131");
+    expect(res.status).toBe(404);
+    expectPrivate(res);
+  });
+
+  it("GET 200 for an owned upload", async () => {
+    mocks.readUploadMeta.mockResolvedValueOnce(meta);
+    const res = await call("4e6f6e2d72656131");
+    expect(res.status).toBe(200);
+    expectPrivate(res);
+  });
+
+  it("DELETE 403 for a cross-site request", async () => {
+    const res = await deleteCall("4e6f6e2d72656131", { origin: "http://elsewhere.test" });
+    expect(res.status).toBe(403);
+    expectPrivate(res);
+  });
+
+  it("DELETE 404 for a malformed id and for an unowned id", async () => {
+    const malformed = await deleteCall("not-a-hash");
+    expect(malformed.status).toBe(404);
+    expectPrivate(malformed);
+    mocks.readUploadMeta.mockResolvedValueOnce(null);
+    const unowned = await deleteCall("4e6f6e2d72656131");
+    expect(unowned.status).toBe(404);
+    expectPrivate(unowned);
+  });
+
+  it("DELETE 200 for an owned upload", async () => {
+    mocks.readUploadMeta.mockResolvedValueOnce(meta);
+    const res = await deleteCall("4e6f6e2d72656131");
+    expect(res.status).toBe(200);
+    expectPrivate(res);
+  });
+});

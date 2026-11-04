@@ -7,18 +7,26 @@ import { NextResponse } from "next/server";
 import { isValidHash16, deleteUpload, hasOtherReadyDocumentCopy, uploadFileExists, uploadMetaToPaper } from "@/lib/papers/upload-store";
 import { ownedUpload, PRIVATE_UPLOAD_HEADERS, sameOriginUploadRequest } from "@/lib/papers/upload-access";
 
+// W8 R-H1: every answer from this route concerns one owner's private upload
+// (or its absence), so every answer — including each early refusal — goes
+// out with the private, no-store header set. One helper so no early return
+// can drop them.
+function privateJson(body: unknown, status = 200) {
+  return NextResponse.json(body, { status, headers: PRIVATE_UPLOAD_HEADERS });
+}
+
 export async function GET(
   _req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
   if (!isValidHash16(id)) {
-    return NextResponse.json({ error: "Not a valid upload id." }, { status: 400 });
+    return privateJson({ error: "Not a valid upload id." }, 400);
   }
 
   const meta = await ownedUpload(id);
   if (!meta) {
-    return NextResponse.json({ error: "Upload not found." }, { status: 404 });
+    return privateJson({ error: "Upload not found." }, 404);
   }
 
   // UPLOAD-404 (§1bi.8a): the record and the PDF bytes are two separate
@@ -29,17 +37,14 @@ export async function GET(
   // the source" action that 404s in raw JSON. Additive field, everything
   // else about this response unchanged, so the page can tell the two states
   // apart and treat both honestly.
-  return NextResponse.json(
-    { ...uploadMetaToPaper(meta), fileAvailable: await uploadFileExists(id) },
-    { headers: PRIVATE_UPLOAD_HEADERS },
-  );
+  return privateJson({ ...uploadMetaToPaper(meta), fileAvailable: await uploadFileExists(id) });
 }
 
 export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  if (!sameOriginUploadRequest(req)) return NextResponse.json({ error: "Cross-site deletion refused." }, { status: 403 });
+  if (!sameOriginUploadRequest(req)) return privateJson({ error: "Cross-site deletion refused." }, 403);
   const { id } = await params;
   const meta = isValidHash16(id) ? await ownedUpload(id) : null;
-  if (!meta) return NextResponse.json({ error: "Upload not found." }, { status: 404, headers: PRIVATE_UPLOAD_HEADERS });
+  if (!meta) return privateJson({ error: "Upload not found." }, 404);
   // 9-22 (A9-02): count this owner's OTHER still-live copies of the same
   // logical document BEFORE deleting this one — the exact A9-02 over-erasure
   // repro was deleting one of two same-DOI copies and losing the only
@@ -50,5 +55,5 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
     ? !(await hasOtherReadyDocumentCopy(meta.ownerKey, meta.documentKey, meta.hash16))
     : true;
   await deleteUpload(meta);
-  return NextResponse.json({ deleted: true, documentKey: meta.documentKey, retractEvidence }, { headers: PRIVATE_UPLOAD_HEADERS });
+  return privateJson({ deleted: true, documentKey: meta.documentKey, retractEvidence });
 }
