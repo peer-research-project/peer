@@ -162,9 +162,10 @@ describe("PlainRewrite", () => {
   it("draws a formula the paragraph held, as the paragraph does", () => {
     const withFormula = renderToStaticMarkup(createElement(PlainRewrite, { text: "The term ⟦x^{2}⟧ grew." }));
 
-    // The marks are not shown; the TeX is, in the mono, until KaTeX arrives in the browser.
+    // The delimiters are hidden; server-rendered KaTeX retains the TeX in accessible MathML.
     expect(withFormula).not.toContain("⟦");
-    expect(withFormula).toMatch(/<code[^>]*>x\^\{2\}<\/code>/);
+    expect(withFormula).toMatch(/<math\b/);
+    expect(withFormula).toContain('<annotation encoding="application/x-tex">x^{2}</annotation>');
   });
 });
 

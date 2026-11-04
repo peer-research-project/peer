@@ -1,0 +1,4 @@
+# Preserve the reviewed transaction payload byte-for-byte on Windows checkouts.
+seed-closure-canonical-lf.sql -text
+# Preserve exported auth.uid function body including its exact whitespace.
+auth-uid-exact.sql -text

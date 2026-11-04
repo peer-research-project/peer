@@ -33,7 +33,7 @@ function upload(caption: string, chartX: number): Buffer {
 let home = "";
 let uploads = "";
 let scratch = "";
-const savedTmpdir = process.env.TMPDIR;
+const savedTemp = { TMPDIR: process.env.TMPDIR, TMP: process.env.TMP, TEMP: process.env.TEMP };
 
 beforeAll(async () => {
   home = await mkdtemp(path.join(tmpdir(), "peer-figure-test-"));
@@ -43,12 +43,16 @@ beforeAll(async () => {
   await mkdir(scratch);
   await writeFile(path.join(uploads, "alice.pdf"), upload(ALICE, 110));
   await writeFile(path.join(uploads, "bob.pdf"), upload(BOB, 150));
-  process.env.TMPDIR = scratch; // `os.tmpdir()` reads this on every call
+  process.env.TMPDIR = scratch;
+  process.env.TMP = scratch;
+  process.env.TEMP = scratch; // Windows reads TEMP/TMP; POSIX reads TMPDIR.
 });
 
 afterAll(async () => {
-  if (savedTmpdir === undefined) delete process.env.TMPDIR;
-  else process.env.TMPDIR = savedTmpdir;
+  for (const [key, value] of Object.entries(savedTemp)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
   vi.unstubAllGlobals();
   await rm(home, { recursive: true, force: true });
 });

@@ -74,3 +74,24 @@ it("illustrates the legacy UTC-key versus Tokyo served-day boundary", () => {
   expect(day("UTC")).toBe("2026-09-24");
   expect(day("Asia/Tokyo")).toBe("2026-09-25");
 });
+
+
+it("serializes digest claims and protects legacy same-owner local-day deliveries", () => {
+  const fn = body("claim_briefing_delivery");
+  expect(fn).toContain("pg_advisory_xact_lock");
+  expect(fn).toContain("if not found then raise exception");
+  expect(fn).toContain("perform now() at time zone v_zone");
+  expect(fn).toMatch(/user_id=p_user_id and local_date is null and \(delivered_at at time zone v_zone\)::date=v_day/i);
+  expect(fn.indexOf("pg_advisory_xact_lock")).toBeLessThan(fn.indexOf("insert into public.briefing_deliveries"));
+  expect(fn.indexOf("local_date is null")).toBeLessThan(fn.indexOf("insert into public.briefing_deliveries"));
+});
+
+it("activates a saved pool strictly after every served date label, whatever zone served it (R-C11)", () => {
+  const fn = body("seed_pool_apply");
+  const floor = fn.slice(fn.indexOf("select max(d) into v_last"), fn.indexOf("v_target :="));
+  expect(floor).toMatch(/from public\.dashboard_batches where owner_id=p_owner_id and status in \('served','acknowledged'\)/i);
+  expect(floor).not.toMatch(/'prepared'/);
+  expect(floor).toMatch(/from public\.briefing_deliveries where user_id=p_owner_id and local_date is not null/i);
+  expect(floor).toMatch(/from public\.seed_pool_observed_days where owner_id=p_owner_id/i);
+  expect(fn).toMatch(/v_target := case when not v_active and not v_served and v_count>0 and \(v_last is null or v_last<v_today\) then v_today else greatest\(v_today\+1, v_last\+1\) end;/i);
+});

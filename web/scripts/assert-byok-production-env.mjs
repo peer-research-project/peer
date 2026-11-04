@@ -78,7 +78,7 @@ const REQUIRED_ONE_OF_ON_VERCEL = [
  * environment) before deploying. The other `PEER_JEV_*` names are inert (nothing
  * reads them), so they do not fail a build.
  */
-const FORBIDDEN_ON_VERCEL = [
+export const FORBIDDEN_ON_VERCEL = [
   // The company's own model key. Peer has none; readers bring theirs.
   "GOOGLE_API_KEY",
   // The Google SDK's other implicit name: a client built without an explicit key reads it (and GOOGLE_API_KEY) itself. Nothing here builds one so; defence in depth.

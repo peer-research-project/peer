@@ -178,7 +178,7 @@
   max-width: none;
   padding: 15px 18px 18px;
   color: var(--color-text-muted);
-  font: 400 15px/1.6 var(--font-sans);
+  font: 400 calc(15px * var(--reading-scale, 1))/1.6 var(--font-sans);
 }
 .reader-visual-caption > span:first-child { color: var(--color-heading); font-weight: 650; }
 .reader-table-scroll {

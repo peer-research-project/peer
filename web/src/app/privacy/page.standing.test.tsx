@@ -58,7 +58,7 @@ describe("/privacy — standing questions (P5-01)", () => {
     expect(sync).toContain("const payload = remoteProfilePayload(merged) as Record<string, unknown>;");
     expect(sync).toContain("const payload = remoteProfilePayload(profile);");
     const puts = sourceFiles(join(root, "src")).filter((file) => /method: "PUT"/.test(readFileSync(file, "utf8")) && /"\/api\/profile"/.test(readFileSync(file, "utf8")));
-    expect(puts.map((file) => relative(root, file))).toEqual(["src/components/profile-sync.tsx"]);
+    expect(puts.map((file) => relative(root, file).split("\\").join("/"))).toEqual(["src/components/profile-sync.tsx"]);
   });
 
   it("the account's side has no place for them: no column, not a merged field, not in the feed request", () => {

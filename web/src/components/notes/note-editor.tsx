@@ -633,6 +633,15 @@ export function visibleWordCount(note: Pick<Note, "blocks" | "sources">, hiddenB
   return wordCount(hiddenBlockId ? { ...note, blocks: note.blocks.filter((b) => b.id !== hiddenBlockId) } : note);
 }
 
+/** D-B9-1: the open editor's doc after the store's title for its note changed from `seen` to `stored` (the rail's
+ *  Rename writes the store, not the editor). The editor adopts the outside title unless its title field holds an
+ *  unsaved edit of the reader's own (`doc.title !== seen`), which still wins; otherwise the next save of the whole doc
+ *  would write the old title back. The same doc when nothing changes. */
+export function adoptStoredTitle(doc: Doc, seen: string, stored: string): Doc {
+  if (stored === seen || doc.title === stored || doc.title !== seen) return doc;
+  return { ...doc, title: stored };
+}
+
 export function NoteEditor({
   note,
   compact = false,
@@ -758,6 +767,16 @@ export function NoteEditor({
     if (compact) return;
     document.title = `${doc.title.trim() || "Untitled"} · Peer`;
   }, [doc.title, compact]);
+
+  // D-B9-1: a title the store gained from outside (the rail's Rename of this open note) is the editor's title too, so
+  // the field and the tab say it and the next save does not write the old one back. `seenTitle` is the stored title
+  // the editor last saw; the editor's own saves move it as well, where `adoptStoredTitle` changes nothing.
+  const seenTitle = useRef(note.title);
+  useEffect(() => {
+    const next = adoptStoredTitle(docRef.current, seenTitle.current, note.title);
+    seenTitle.current = note.title;
+    if (next !== docRef.current) commit(next);
+  }, [note.title, commit]);
 
   const onDocRef = useRef(onDoc);
   onDocRef.current = onDoc;

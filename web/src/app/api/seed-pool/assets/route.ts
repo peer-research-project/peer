@@ -48,7 +48,7 @@ export async function POST(req: Request) {
     if (!extracted.ok || !extracted.doc) return reply({ error: "This PDF has no readable text. Choose another paper." }, 422);
     const firstPageDoi = extracted.page1Text?.match(/\b10\.\d{4,9}\/[\w.()/:;-]+/i)?.[0];
     const doi = await verifiedPublicDoi(firstPageDoi, extracted.doc.title ?? "");
-    const paper = seedFromExtractedDocument(extracted.doc, bytes, doi);
+    const paper = seedFromExtractedDocument(extracted.doc, bytes, doi, extracted.infoTitle);
     if (!paper) return reply({ error: "This PDF has no readable text or usable research terms. Choose another paper." }, 422);
     // Separate namespace: ordinary reading deletion/30-day purge cannot remove this copy.
     const objectName = `seed-pool/${ownerKey}/${paper.id}.pdf`;

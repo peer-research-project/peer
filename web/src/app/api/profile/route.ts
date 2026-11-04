@@ -150,13 +150,21 @@ function isMissingFeedIntentColumn(error: { message?: string; code?: string } | 
 
 // ── Handlers ────────────────────────────────────────────────────
 
+// W8 R-H1: every answer here is about one signed-in owner (or the absence of
+// one), so none may be stored by a shared cache — the 401s and error answers
+// included. One helper so no early return can drop the header.
+const PRIVATE_PROFILE_HEADERS = { "Cache-Control": "private, no-store" };
+function privateJson(body: unknown, status = 200) {
+  return NextResponse.json(body, { status, headers: PRIVATE_PROFILE_HEADERS });
+}
+
 export async function GET() {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) {
-    return NextResponse.json({ profile: null }, { status: 401 });
+    return privateJson({ profile: null }, 401);
   }
 
   const { data, error } = await supabase
@@ -166,19 +174,19 @@ export async function GET() {
     .maybeSingle();
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return privateJson({ error: error.message }, 500);
   }
 
   // Wrapped in try/catch because `profileRowToProfile` (P1 §1l) can throw
   // `invalid_feed_intent` when the stored `feed_intent` column is malformed —
   // theirs' version of this route never had that failure mode.
   try {
-    return NextResponse.json({
+    return privateJson({
       profile: data ? profileRowToProfile(data as ProfileRow) : null,
     });
   } catch (error) {
     if (error instanceof Error && error.message === "invalid_feed_intent") {
-      return NextResponse.json({ error: "invalid_feed_intent" }, { status: 500 });
+      return privateJson({ error: "invalid_feed_intent" }, 500);
     }
     throw error;
   }
@@ -190,13 +198,13 @@ export async function PUT(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) {
-    return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
+    return privateJson({ error: "unauthenticated" }, 401);
   }
 
   const body = (await request.json()) as Partial<UserProfile>;
   if (Object.prototype.hasOwnProperty.call(body, "feedIntent")) {
     const parsed = normalizePersistedFeedIntent(body.feedIntent);
-    if (!parsed.ok) return NextResponse.json({ error: "invalid_feed_intent" }, { status: 400 });
+    if (!parsed.ok) return privateJson({ error: "invalid_feed_intent" }, 400);
     body.feedIntent = parsed.intent;
   }
 
@@ -311,17 +319,17 @@ export async function PUT(request: NextRequest) {
   }
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return privateJson({ error: error.message }, 500);
   }
 
   try {
-    return NextResponse.json({
+    return privateJson({
       profile: profileRowToProfile(data as ProfileRow),
       ignored,
     });
   } catch (caught) {
     if (caught instanceof Error && caught.message === "invalid_feed_intent") {
-      return NextResponse.json({ error: "invalid_feed_intent" }, { status: 500 });
+      return privateJson({ error: "invalid_feed_intent" }, 500);
     }
     throw caught;
   }

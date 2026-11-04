@@ -57,6 +57,14 @@ export interface PdfTextResult {
    * exactly where a title and a DOI are printed.
    */
   page1Text?: string;
+  /**
+   * R-T1 (W9, 2026-11-04) — uploads only: the PDF's own Info dictionary
+   * /Title, as pdf.js decodes it, untrimmed and unjudged. The layout title
+   * (`doc.title`, the largest words on page 1) is missing when the title line
+   * is set in the body's size; a seed paper falls back to this, after
+   * `seed-pool/features.ts` has refused a generic one. Never a model's guess.
+   */
+  infoTitle?: string;
 }
 
 async function downloadPdf(
@@ -126,6 +134,22 @@ export async function getPdfBytes(url: string): Promise<{ bytes: Buffer } | { er
 /** The PDF's text layer, page by page, as `pdf-outline` wants it. Exported
  *  for the probes that look at a real PDF's lines when the outline misreads. */
 export async function readPages(bytes: Buffer): Promise<PdfPageText[]> {
+  return (await readPdf(bytes)).pages;
+}
+
+/** The PDF's Info /Title from the same open document; nothing when it has
+ *  none or pdf.js cannot read it — never a failed reading. */
+async function infoTitleOf(doc: { getMetadata(): Promise<{ info: unknown }> }): Promise<string | undefined> {
+  try {
+    const title = ((await doc.getMetadata()).info as { Title?: unknown } | null)?.Title;
+    return typeof title === "string" && title.trim() ? title : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** `readPages`, plus the Info /Title (R-T1) — one open of the PDF for both. */
+async function readPdf(bytes: Buffer): Promise<{ pages: PdfPageText[]; infoTitle?: string }> {
   // `unpdf` ships pdf.js built for a server runtime: no worker, no canvas,
   // no native code — the only build that runs unchanged in a function.
   const { getDocumentProxy } = await import("unpdf");
@@ -154,7 +178,7 @@ export async function readPages(bytes: Buffer): Promise<PdfPageText[]> {
     }
     pages.push({ page: n, items });
   }
-  return pages;
+  return { pages, infoTitle: await infoTitleOf(doc) };
 }
 
 function normalize(extractor: PdfOutline): ExtractedDocument {
@@ -317,7 +341,7 @@ export async function tryExtractPdfText(url: string): Promise<PdfTextResult> {
  */
 export async function extractPdfTextFromBytes(bytes: Buffer): Promise<PdfTextResult> {
   try {
-    const pages = await readPages(bytes);
+    const { pages, infoTitle } = await readPdf(bytes);
     // Page 1's lines as printed, joined with spaces, before any of them is set
     // aside as the cover. Read in the columns the outline reads them in (P7-10:
     // the paper's own gutter, for a first page too sparse to show one), so a
@@ -335,7 +359,7 @@ export async function extractPdfTextFromBytes(bytes: Buffer): Promise<PdfTextRes
     if (!outline.sections || outline.sections.length === 0) {
       return { ok: false, reason: outline.reason ?? "no-sections", page1Text: page1Text || undefined };
     }
-    return { ok: true, doc: await withFigureSizes(normalize(outline), bytes), page1Text: page1Text || undefined };
+    return { ok: true, doc: await withFigureSizes(normalize(outline), bytes), page1Text: page1Text || undefined, ...(infoTitle ? { infoTitle } : {}) };
   } catch (err) {
     // The file is not a PDF pdf.js can open. Not a scan: say it failed. The
     // error names the problem, never the text.

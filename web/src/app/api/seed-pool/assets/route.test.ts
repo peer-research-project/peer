@@ -31,6 +31,11 @@ describe("private seed asset upload", () => {
     expect(mocks.stage).toHaveBeenCalledWith(owner, paper, expect.stringMatching(/^seed-pool\/[a-f0-9]{64}\/11111111-1111-4111-8111-111111111111\.pdf$/), 7);
     expect(mocks.finish).toHaveBeenCalledWith(owner, id);
   });
+  it("R-T1: hands the PDF's Info /Title to the seed builder for its title fallback", async () => {
+    mocks.extract.mockResolvedValue({ ok: true, doc: { title: null, sections: [] }, infoTitle: "Fictional study: glacier meltwater sediment transport" });
+    expect((await POST(request())).status).toBe(200);
+    expect(mocks.build).toHaveBeenCalledWith(expect.anything(), expect.any(Buffer), undefined, "Fictional study: glacier meltwater sediment transport");
+  });
   it("rejects a privacy-generation race before writing the file", async () => {
     mocks.stage.mockResolvedValue(false);
     expect((await POST(request())).status).toBe(409);

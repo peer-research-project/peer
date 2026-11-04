@@ -1,6 +1,12 @@
 import { existsSync } from "node:fs";
 import { rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
+
+// Observe the requested file mode on every platform; Windows stat does not expose POSIX permissions.
+vi.mock("node:fs/promises", async (original) => {
+  const actual = await original<typeof import("node:fs/promises")>();
+  return { ...actual, writeFile: vi.fn(actual.writeFile) };
+});
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ExtractedDocument } from "./html-text";
 import { minimalPdf, prose } from "./minimal-pdf.test-helper";
@@ -301,7 +307,8 @@ describe("getFullText — P0-02, an upload is extracted once and cached for its 
     expect(second).toEqual(first);
     expect(second.doc).toEqual(doc);
     expect(existsSync(sidecar("00000000000000a1"))).toBe(true);
-    expect((await stat(sidecar("00000000000000a1"))).mode & 0o777).toBe(0o600);
+    expect(vi.mocked(writeFile).mock.calls.some(([name, , options]) => String(name).includes(".doc.json.") && typeof options === "object" && options !== null && "mode" in options && options.mode === 0o600)).toBe(true);
+    if (process.platform !== "win32") expect((await stat(sidecar("00000000000000a1"))).mode & 0o777).toBe(0o600);
   });
 
   it("shares one extraction between two opens that arrive together", async () => {
