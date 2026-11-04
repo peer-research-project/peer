@@ -32,13 +32,13 @@ if ($Action -eq 'bundle') {
   }
   if ((Invoke-LocalSql "SELECT coalesce(to_regclass('public.seed_pool_state')::text,'absent')") -ne 'absent') { throw 'Refusing replay on a database that already has seed state' }
   $bundle = Join-Path $PSScriptRoot 'seed-closure-canonical-lf.sql'
-  if ((Get-FileHash -Algorithm SHA256 -LiteralPath $bundle).Hash -ne 'F1D16D710C9B451CE90F5F3254B80DFE9D0A566779EC2485C51207BAEAC5745A') { throw 'Bundle hash mismatch' }
+  if ((Get-FileHash -Algorithm SHA256 -LiteralPath $bundle).Hash -ne 'A7878BF3A92587B653159604AED6DF0F959207A9C36958E686729EB215120A1B') { throw 'Bundle hash mismatch' }
   & $psql @psqlArgs -f $bundle
   if ($LASTEXITCODE -ne 0) { throw 'Local bundle replay failed' }
   Write-Output 'Exact local bundle replay passed.'
 }
 if ($Action -eq 'tests') {
-  foreach ($name in @('prodmeta-legacy-check.sql','lifecycle-prodmeta.sql','dates-permissions-prodmeta.sql','legacy-retention-prodmeta.sql','prodmeta-owner-cleanup.sql','prodmeta-legacy-digest-fixed.sql')) {
+  foreach ($name in @('prodmeta-legacy-check.sql','lifecycle-prodmeta.sql','dates-permissions-prodmeta.sql','legacy-retention-prodmeta.sql','prodmeta-owner-cleanup.sql','prodmeta-legacy-digest-fixed.sql','served-label-floor-prodmeta.sql')) {
     & $psql @psqlArgs -f (Join-Path $PSScriptRoot $name)
     if ($LASTEXITCODE -ne 0) { throw "Local test failed: $name" }
   }
