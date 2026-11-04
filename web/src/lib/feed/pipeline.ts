@@ -10,7 +10,7 @@ import type { SeedPaper, SeedSnapshot } from "@/lib/seed-pool/types";
 import { dropStale } from "./freshness";
 import type { ScoredItem, FeedAdmissionChannel } from "@/lib/scoring/types";
 import { dedupItems } from "./dedup";
-import { applyTier1Rerank } from "./rerank";
+import { applyDiversityCap, applyTier1Rerank } from "./rerank";
 import { applyRerankOrder, applyTier2Rerank } from "./tier2-rerank";
 import { briefToSeedTexts, compileSearchBrief } from "./profile-compiler";
 import type { FeedRequest, FeedResponse, FeedEmptyReasonCode } from "./types";
@@ -2040,7 +2040,8 @@ export async function runFeedPipeline(
   // Preferred-journal boost: applied LAST (after every rerank) so a paper
   // published in one of the user's preferred journals reliably floats up,
   // while an exceptionally strong non-journal match can still outrank it.
-  const journalRanked = seedPapers.length ? aiRanked : applyJournalBoost(aiRanked, req.venues ?? []);
+  // R-C6b: a seeded user keeps this user-declared venue boost too.
+  const journalRanked = applyJournalBoost(aiRanked, req.venues ?? []);
   // Don't show items the caller already showed this user recently. Run
   // AFTER ranking so the score reflects the full candidate pool, but BEFORE
   // slicing so we still return `topN` fresh items.
@@ -2095,7 +2096,10 @@ export async function runFeedPipeline(
   // rollover candidates merged in (web/src/lib/feed/rollover.test.ts):
   // `fresh` can only be as large as the genuinely eligible candidate count,
   // rollover or not.
-  const finalRanked = seedPapers.length ? diversifySeedRanking(fresh, seedPapers) : fresh;
+  // R-C6b: the seeded path skips Tier 1's local score boosts (the seed blend
+  // is the only score) but keeps its per-author/per-topic cap, applied last
+  // so the seed-interest swap above cannot undo it.
+  const finalRanked = seedPapers.length ? applyDiversityCap(diversifySeedRanking(fresh, seedPapers), brief) : fresh;
   const returned = finalRanked.slice(0, topN);
   // P4-S6 — `finalPool` is `fresh`'s own prefix (both are `.slice(0, N)` of
   // the SAME `fresh` array from index 0), so `returned` is ALWAYS a prefix
