@@ -13,7 +13,7 @@ export type Run = [text: string, x: number, top: number, size: number, bold?: bo
  * Python: the fixtures the PyMuPDF tests used to draw are drawn here. A page
  * with no runs is a page with no text layer, the way a scan reads.
  */
-export function minimalPdf(pages: Run[][]): Buffer {
+export function minimalPdf(pages: Run[][], options: { infoTitle?: string } = {}): Buffer {
   const objects: string[] = [];
   const add = (body: string) => objects.push(body);
   add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>");
@@ -35,6 +35,8 @@ export function minimalPdf(pages: Run[][]): Buffer {
   }
   objects[pagesId - 1] = `<< /Type /Pages /Kids [${kids.map((k) => `${k} 0 R`).join(" ")}] /Count ${kids.length} >>`;
   const catalog = add(`<< /Type /Catalog /Pages ${pagesId} 0 R >>`);
+  // An optional Info dictionary (R-T1): the /Title a PDF writer stores apart from the page's text.
+  const info = options.infoTitle === undefined ? null : add(`<< /Title (${escape(options.infoTitle)}) >>`);
   let out = "%PDF-1.4\n";
   const offsets: number[] = [];
   objects.forEach((body, i) => {
@@ -44,7 +46,7 @@ export function minimalPdf(pages: Run[][]): Buffer {
   const xref = Buffer.byteLength(out, "latin1");
   out += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
   out += offsets.map((o) => `${String(o).padStart(10, "0")} 00000 n \n`).join("");
-  out += `trailer\n<< /Size ${objects.length + 1} /Root ${catalog} 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  out += `trailer\n<< /Size ${objects.length + 1} /Root ${catalog} 0 R${info ? ` /Info ${info} 0 R` : ""} >>\nstartxref\n${xref}\n%%EOF\n`;
   return Buffer.from(out, "latin1");
 }
 

@@ -55,8 +55,24 @@ export function isSeedBoilerplate(label: string): boolean {
     || SEED_BOILERPLATE_PHRASES.some((phrase) => padded.includes(` ${phrase} `)));
 }
 
+/**
+ * R-T1 (W9, 2026-11-04): the PDF's Info /Title, when it names the paper. A
+ * title line set in the body's own size gives no layout title (`doc.title`);
+ * the Info /Title then stands in, unless it is empty, longer than 300
+ * characters, or generic: "untitled…", "unspecified", a "Microsoft Word - …"
+ * stamp, or a file name ("draft.pdf"). Otherwise nothing: the seed keeps
+ * "Untitled PDF" and no title is ever invented.
+ */
+export function usableInfoTitle(raw: string | undefined): string | undefined {
+  const title = raw?.replace(/\p{Cc}+/gu, " ").replace(/\s+/g, " ").trim();
+  if (!title || title.length > 300) return undefined;
+  if (/^(?:untitled\b|unspecified$|unknown$|microsoft\s+(?:word|powerpoint|excel)\s+-)/i.test(title)) return undefined;
+  if (/\.(?:pdf|docx?|odt|rtf|tex|dvi|ps|pptx?)$/i.test(title)) return undefined;
+  return title;
+}
+
 /** A seed requires actual readable body text and at least one extracted facet. */
-export function seedFromExtractedDocument(doc: ExtractedDocument, bytes: Buffer, verifiedDoi?: string): SeedPaper | null {
+export function seedFromExtractedDocument(doc: ExtractedDocument, bytes: Buffer, verifiedDoi?: string, infoTitle?: string): SeedPaper | null {
   const body = doc.sections.map((section) => section.text ?? "").join(" ");
   if (!hasReadableText(body)) return null;
   const features: SeedPaper["features"] = { topic: [], object: [], method: [] };
@@ -70,7 +86,7 @@ export function seedFromExtractedDocument(doc: ExtractedDocument, bytes: Buffer,
   const normalizedDoi = verifiedDoi?.toLowerCase();
   const contentHash = createHash("sha256").update(bytes).digest("hex");
   return {
-    id, uploadId: `seed:${id}`, contentHash, title: doc.title?.trim() || "Untitled PDF",
+    id, uploadId: `seed:${id}`, contentHash, title: doc.title?.trim() || usableInfoTitle(infoTitle) || "Untitled PDF",
     canonicalKey: normalizedDoi ? `doi:${normalizedDoi}` : `sha256:${contentHash}`,
     features, ...(normalizedDoi ? { publicIds: { doi: normalizedDoi } } : {}),
   };
