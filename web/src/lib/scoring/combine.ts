@@ -438,8 +438,10 @@ export function scoreItems(
       score: combined,
       scoreBreakdown: breakdown,
       matchedKeywords: kw.matched,
-      relevanceReason: seedEnabled && seedMatches[0]?.hits.length
-        ? `Shares ${seedMatches[0].hits.slice(0, 2).map((hit) => hit.phrase).join(" and ")} with a seed paper.`
+      // R-C18: a seed reason only when that seed's match admits the item on
+      // its own; otherwise the ordinary reason, never a sub-bar seed claim.
+      relevanceReason: seedEnabled && admitsBySeed(seedMatches[0]) && seedMatches[0].reasonPhrases.length
+        ? `Shares ${seedMatches[0].reasonPhrases.join(" and ")} with a seed paper.`
         : generateReason(item, kw.matched, breakdown),
     });
   });

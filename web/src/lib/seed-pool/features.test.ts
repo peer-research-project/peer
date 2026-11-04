@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ExtractedDocument } from "@/lib/papers/html-text";
-import { seedFromExtractedDocument, verifiedPublicDoi } from "./features";
+import { isSeedBoilerplate, seedFromExtractedDocument, verifiedPublicDoi } from "./features";
 const doc: ExtractedDocument = { title: "Fictional Sodium Cathode Study", source: "pdf", figureCaptions: [], sections: [{ id: "s0", heading: "Methods", canonical: "methods", text: "Sodium cathode materials were tested using microscopy and diffraction. ".repeat(10) }] };
 afterEach(() => vi.unstubAllGlobals());
 describe("private seed features", () => {
@@ -24,5 +24,21 @@ describe("private seed features", () => {
     expect(await verifiedPublicDoi("10.1234/example", doc.title!)).toBe("10.1234/example");
     expect(String(fetcher.mock.calls[0][0])).not.toContain("Sodium");
     expect(await verifiedPublicDoi("10.1234/example", "Other Fictional Paper")).toBeUndefined();
+  });
+});
+
+describe("R-C18 seed boilerplate stoplist", () => {
+  const boiler: ExtractedDocument = { title: "Glacier Meltwater Pathways", source: "pdf", figureCaptions: [], sections: [{ id: "s0", heading: "Results", canonical: "results", text: "Glacier meltwater pathways were traced in a real experiment. We release test data and a synthetic example for glacier meltwater. ".repeat(8) }] };
+  it("drops research boilerplate at seed creation and keeps the subject", () => {
+    const seed = seedFromExtractedDocument(boiler, Buffer.from("boiler"));
+    if (!seed) throw new Error("Expected a readable seed");
+    const all = [...seed.features.topic, ...seed.features.object, ...seed.features.method];
+    expect(all.some((label) => label.includes("glacier meltwater"))).toBe(true);
+    for (const label of all) expect(isSeedBoilerplate(label)).toBe(false);
+    expect(all.join(" | ")).not.toMatch(/test data|real experiment|synthetic example/);
+  });
+  it("names only the explicit stoplist and all-boilerplate labels", () => {
+    for (const label of ["test data", "real experiment", "synthetic example", "this paper", "synthetic example denser", "experiment results"]) expect(isSeedBoilerplate(label)).toBe(true);
+    for (const label of ["glacier meltwater", "impedance spectroscopy", "battery electrolyte stability", "synthetic aperture radar", "test bench"]) expect(isSeedBoilerplate(label)).toBe(false);
   });
 });

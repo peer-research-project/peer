@@ -74,3 +74,20 @@ describe("R-C6 facet weights renormalized over the facets a seed has", () => {
     expect(matchSeed("Peat bog carbon", facets(["  "], [], [])).score).toBe(0);
   });
 });
+
+describe("R-C18 grounded, informative seed reason phrases", () => {
+  it("leads with the strongest facet and never joins scattered words with slashes", () => {
+    const wide = { id: "w", canonicalKey: "sha256:w", features: { topic: ["forest canopy", "leaf litter", "soil fungi", "root depth"], object: ["moraine lake"], method: ["dye tracing"] } };
+    const match = matchSeed("Forest canopy over a moraine lake studied by dye tracing", wide);
+    expect(match.reasonPhrases[0]).toBe("moraine lake");
+    expect(match.reasonPhrases).toHaveLength(2);
+    expect(match.reasonPhrases).not.toContain("forest canopy");
+    const scattered = matchSeed("Electrolytes with solid interfaces", battery);
+    expect(scattered.reasonPhrases).toEqual(["the terms solid and electrolyte"]);
+    expect(scattered.reasonPhrases.join(" ")).not.toContain("/");
+  });
+  it("prefers a phrase found as written and skips one already covered", () => {
+    const s = { id: "c", canonicalKey: "sha256:c", features: { topic: ["water retention", "forest canopy water", "canopy water"], object: [], method: [] } };
+    expect(matchSeed("Water retention by the forest canopy: canopy water after rain", s).reasonPhrases).toEqual(["water retention", "canopy water"]);
+  });
+});

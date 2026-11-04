@@ -7,7 +7,11 @@ export interface SeedFacets { topic: readonly string[]; object: readonly string[
 export interface MatchingSeed { id: string; canonicalKey: string; contentHash?: string; features: SeedFacets }
 export type SeedFacet = keyof SeedFacets;
 export interface FacetHit { facet: SeedFacet; phrase: string }
-export interface SeedMatch { seedId: string; canonicalKey: string; score: number; hits: FacetHit[] }
+export interface SeedMatch {
+  seedId: string; canonicalKey: string; score: number; hits: FacetHit[];
+  /** R-C18: up to two matched seed phrases for a reason, strongest facet and most informative first, rendered without slashes. */
+  reasonPhrases: string[];
+}
 
 const FACETS: ReadonlyArray<{ name: SeedFacet; weight: number }> = [
   { name: "topic", weight: 0.5 }, { name: "object", weight: 0.3 }, { name: "method", weight: 0.2 },
@@ -24,6 +28,7 @@ export function matchSeed(candidateText: string, seed: MatchingSeed): SeedMatch 
   const tokens = tokenizeFolded(candidateText);
   const candidate = new Set(tokens);
   const hits: FacetHit[] = [];
+  const ranked: { facetScore: number; contiguous: boolean; parts: string[]; text: string }[] = [];
   let score = 0;
   const facets = FACETS.map(({ name, weight }) => {
     const phrases = [...new Set(seed.features[name].map((v) => v.trim()).filter(Boolean))];
@@ -40,15 +45,36 @@ export function matchSeed(candidateText: string, seed: MatchingSeed): SeedMatch 
     if (!matching.length) continue;
     const doc = (id: string, title: string): RawItem => ({ id, title, source: "openalex", authors: [], url: "", publishedAt: "", metadata: {} });
     const index = buildIndex([doc("candidate", matching.join(" ")), doc("facet", terms.join(" "))], tokenizeFolded);
-    score += weight * scoreTfidf("candidate", terms.join(" "), index, tokenizeFolded);
+    const facetScore = weight * scoreTfidf("candidate", terms.join(" "), index, tokenizeFolded);
+    score += facetScore;
     for (const phrase of phrases) {
       const parts = tokenizeFolded(phrase);
       if (!parts.length || !parts.every((part) => candidate.has(part))) continue;
       const contiguous = tokens.some((_, i) => parts.every((part, j) => tokens[i + j] === part));
       hits.push({ facet: name, phrase: contiguous ? phrase : parts.join(" / ") });
+      ranked.push({ facetScore, contiguous, parts, text: contiguous ? phrase : `the terms ${listWords([...new Set(parts)])}` });
     }
   }
-  return { seedId: seed.id, canonicalKey: seed.canonicalKey, score: hits.length ? clamp(score) : 0, hits };
+  return { seedId: seed.id, canonicalKey: seed.canonicalKey, score: hits.length ? clamp(score) : 0, hits, reasonPhrases: reasonPhrases(ranked) };
+}
+
+const listWords = (words: readonly string[]) => words.length < 2 ? words.join("") : `${words.slice(0, -1).join(", ")} and ${words[words.length - 1]}`;
+
+/** R-C18: the strongest facet first (an object or method beats a weaker
+ * topic), then a phrase found as written before scattered words, then the
+ * longer phrase; skip a phrase whose words a chosen phrase already covers. */
+function reasonPhrases(ranked: { facetScore: number; contiguous: boolean; parts: string[]; text: string }[]): string[] {
+  const chosen: string[] = [];
+  const covered = new Set<string>();
+  const order = [...ranked].sort((a, b) => b.facetScore - a.facetScore
+    || Number(b.contiguous) - Number(a.contiguous) || b.parts.length - a.parts.length);
+  for (const hit of order) {
+    if (chosen.length === 2) break;
+    if (hit.parts.every((part) => covered.has(part))) continue;
+    chosen.push(hit.text);
+    for (const part of hit.parts) covered.add(part);
+  }
+  return chosen;
 }
 
 /** Group exact-byte or canonical duplicates, including transitive aliases. */

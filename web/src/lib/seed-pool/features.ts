@@ -33,12 +33,35 @@ export async function verifiedPublicDoi(rawDoi: string | undefined, extractedTit
     return expected.split(" ").length >= 3 && expected === actual ? doi : undefined;
   } catch { return undefined; }
 }
+/**
+ * R-C18: research boilerplate that says nothing about what a paper is about.
+ * Applied only when a seed is created (ordinary upload concepts are
+ * unchanged): a label containing one of these phrases, or made only of these
+ * words, never becomes a seed facet, so it can neither score nor be named in
+ * a recommendation reason.
+ */
+export const SEED_BOILERPLATE_PHRASES: readonly string[] = [
+  "test data", "real experiment", "synthetic example", "this paper", "this study",
+  "our results", "real data", "toy example", "example data",
+];
+const SEED_BOILERPLATE_WORDS = new Set([
+  "test", "data", "real", "experiment", "experiments", "synthetic", "example", "examples",
+  "this", "paper", "study", "result", "results",
+]);
+export function isSeedBoilerplate(label: string): boolean {
+  const words = label.toLowerCase().split(/\s+/).filter(Boolean);
+  const padded = ` ${words.join(" ")} `;
+  return words.length > 0 && (words.every((word) => SEED_BOILERPLATE_WORDS.has(word))
+    || SEED_BOILERPLATE_PHRASES.some((phrase) => padded.includes(` ${phrase} `)));
+}
+
 /** A seed requires actual readable body text and at least one extracted facet. */
 export function seedFromExtractedDocument(doc: ExtractedDocument, bytes: Buffer, verifiedDoi?: string): SeedPaper | null {
   const body = doc.sections.map((section) => section.text ?? "").join(" ");
   if (!hasReadableText(body)) return null;
   const features: SeedPaper["features"] = { topic: [], object: [], method: [] };
   for (const concept of extractUploadConcepts(doc)) {
+    if (isSeedBoilerplate(concept.label)) continue;
     const facet = concept.facet === "method" ? "method" : concept.facet === "material" ? "object" : "topic";
     if (!features[facet].includes(concept.label)) features[facet].push(concept.label);
   }

@@ -81,3 +81,17 @@ describe("R-C7 seed blend scale and inspectable breakdown", () => {
     for (const row of ranked) expect(row.scoreBreakdown.seedBlend?.weights).toEqual({ seed: 0.4, intent: 0.35, feedback: 0.15, recencySource: 0.1 });
   });
 });
+
+describe("R-C18 seed reason only when the seed admits the item", () => {
+  it("gives the ordinary reason when the seed match is below the admission bar", () => {
+    const candidate = item("m", "Satellite imaging of lithium battery plants");
+    const [row] = scoreItems([candidate], { topics: ["lithium battery"] }, undefined, now, [seed]);
+    expect(row.scoreBreakdown.seedBlend?.seed).toBeGreaterThan(0);
+    expect(row.relevanceReason).not.toContain("seed paper");
+  });
+  it("names the strongest matched facet when the seed does admit", () => {
+    const candidate = item("y", "Rainforest tree crowns by satellite imaging");
+    const [row] = scoreItems([candidate], { topics: ["lithium battery"] }, undefined, now, [seed]);
+    expect(row.relevanceReason).toBe("Shares rainforest tree and satellite imaging with a seed paper.");
+  });
+});
