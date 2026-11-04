@@ -8,6 +8,7 @@ import { useEffect, useState, type ReactElement, type ReactNode } from "react";
 import { hookRuntime } from "@/test-support/hook-runtime";
 import { OwnerSeedPool, SeedPool } from "./seed-pool";
 import { SeedPoolRequestError } from "@/lib/seed-pool/client-api";
+import { renderToStaticMarkup } from "react-dom/server";
 const seed = (id: string) => ({ id, uploadId: id, canonicalKey: id, contentHash: id, title: `Paper ${id}`, features: { topic: ["soil"], object: ["roots"], method: ["imaging"] } });
 const editor = () => ({ status: "ready", schemaInstalled: true, ownerLocalDate: "2026-11-01", timezone: "America/Chicago", snapshot: { version: "v", effectiveLocalDate: "2026-11-01", seeds: [seed("a")], revocationGeneration: 0 }, availableAssets: [seed("a")], revision: 2, revocationGeneration: 0 });
 type El = ReactElement<Record<string, unknown> & { children?: ReactNode }>;
@@ -15,10 +16,11 @@ const all = (node: ReactNode): El[] => Array.isArray(node) ? node.flatMap(all) :
 const words = (node: ReactNode): string => Array.isArray(node) ? node.map(words).join("") : typeof node === "string" || typeof node === "number" ? String(node) : node && typeof node === "object" && "props" in node ? words((node as El).props.children) : "";
 const btn = (nodes: El[], text: string) => nodes.find((n) => n.type === "button" && words(n.props.children) === text)!;
 type Step = (nodes: El[]) => void;
+let lastTree: ReactNode = null;
 async function run(steps: Step[], onProgress?: (state: { busy: boolean; dirty: boolean }) => void) {
  const pending = [...steps]; let nodes: El[] = [];
  const mounted = await hookRuntime.mount(() => { const tree = OwnerSeedPool({ onProgress }); nodes = all(tree); const [round, setRound] = useState(0); useEffect(() => { if (!btn(nodes, "Save pool") || !pending.length) return; pending.shift()!(nodes); setRound((n) => n + 1); }, [round, !!btn(nodes, "Save pool")]); return tree; }, { maxRounds: 100 });
- mounted.unmount(); expect(pending).toHaveLength(0); return nodes;
+ lastTree = mounted.value; mounted.unmount(); expect(pending).toHaveLength(0); return nodes;
 }
 const press = (text: string): Step => (nodes) => (btn(nodes, text).props.onClick as () => void)();
 const change = (node: El, value: unknown) => (node.props.onChange as (value: unknown) => void)(value);
@@ -118,4 +120,106 @@ it("reports unsaved selection until a saved editor is reloaded", async () => {
  await run([rights, file, (n) => expect(words(n)).toContain("ready"), press("Save pool")], progress);
  expect(progress).toHaveBeenCalledWith({ busy: false, dirty: true });
  expect(progress).toHaveBeenCalledWith({ busy: false, dirty: false });
+});
+
+// D-C2-1 (RUBRIC Theme C unit 2): the pool used to render as bare HTML inside the designed Profile page — plain-text
+// buttons, a native "Choose Files" input, unstyled headings. These pin the app's own primitives on every control and
+// that every string the editor showed before is still shown. Layout is not computed in this node environment; the
+// 320 px check is in docs/handoff/upload-abstract/checkpoints/C-w5-seed-ui-tz.md.
+describe("the seed pool wears the app's primitives (D-C2-1)", () => {
+ const TOUCH_FLOOR = "[@media(hover:none)]:min-h-11";
+ const classesOf = (tag: string) => (/\bclass="([^"]*)"/.exec(tag)?.[1] ?? "").split(/\s+/).filter(Boolean);
+ const buttonTag = (html: string, label: string) => (html.match(/<button\b[^>]*>[^<]*<\/button>/g) ?? []).find((tag) => tag.endsWith(`>${label}</button>`)) ?? "";
+ const tagWith = (html: string, pattern: RegExp) => html.match(pattern)?.[0] ?? "";
+ const textOf = (html: string) => html.replace(/<[^>]*>/g, "").replace(/&#x27;/g, "'").replace(/&amp;/g, "&").replace(/&quot;/g, '"');
+ async function fullEditor() {
+  api.get.mockResolvedValue({ ...editor(), pending: { version: "v2", effectiveLocalDate: "2026-11-02", seeds: [seed("a")], revocationGeneration: 0 }, cleanupPending: [{ id: "revoked-id" }] });
+  api.upload.mockResolvedValueOnce(seed("b")).mockRejectedValueOnce(new Error("This PDF has no readable text."));
+  await run([rights, (n) => change(n.find((x) => x.type === "input" && x.props.type === "file")!, { target: { files: [new File(["%PDF"], "one.pdf", { type: "application/pdf" }), new File(["%PDF"], "two.pdf", { type: "application/pdf" })], value: "x" } }), (n) => expect(words(n)).toContain("two.pdf: failed"), press("Forget this PDF and its recommendations")]);
+  return renderToStaticMarkup(lastTree as ReactElement);
+ }
+
+ it("draws Save pool as the primary pill and the secondary actions as soft pills, all 44 px on touch", async () => {
+  const html = await fullEditor();
+  const save = classesOf(buttonTag(html, "Save pool"));
+  expect(save).toEqual(expect.arrayContaining(["rounded-full", "bg-accent", "text-bg", TOUCH_FLOOR]));
+  for (const label of ["Undo pending changes", "Retry file cleanup 1"]) {
+   const classes = classesOf(buttonTag(html, label));
+   expect(classes, label).toEqual(expect.arrayContaining(["rounded-full", "bg-bg-secondary/60", TOUCH_FLOOR]));
+   expect(classes, label).not.toContain("bg-accent");
+  }
+ });
+
+ it("draws Forget as the quiet destructive text action and its second step as the Profile's Confirm / Cancel", async () => {
+  const html = await fullEditor();
+  const forget = classesOf(buttonTag(html, "Forget this PDF and its recommendations"));
+  expect(forget).toEqual(expect.arrayContaining(["underline", "hover:text-red", "text-text-muted", TOUCH_FLOOR]));
+  expect(forget).not.toContain("bg-accent");
+  expect(classesOf(buttonTag(html, "Confirm forget"))).toEqual(expect.arrayContaining(["text-red", "font-medium", TOUCH_FLOOR]));
+  expect(classesOf(buttonTag(html, "Cancel"))).toEqual(expect.arrayContaining(["text-text-faint", TOUCH_FLOOR]));
+  // A text action keeps a mouse's box the height of its words: no height outside hover:none.
+  for (const label of ["Forget this PDF and its recommendations", "Confirm forget", "Cancel"]) {
+   for (const cls of classesOf(buttonTag(html, label))) if (/(^|:)(min-h|h)-/.test(cls)) expect(cls.startsWith("[@media(hover:none)]:"), cls).toBe(true);
+  }
+ });
+
+ it("replaces the native file picker with an Add PDFs pill whose hidden input is still focusable and named", async () => {
+  const html = await fullEditor();
+  const label = tagWith(html, /<label\b[^>]*>Add PDFs <input\b[^>]*\/?>/);
+  expect(label).not.toBe("");
+  expect(classesOf(label)).toEqual(expect.arrayContaining(["rounded-full", "bg-accent-dim", "text-accent", TOUCH_FLOOR, "has-[:focus-visible]:outline-2"]));
+  const input = tagWith(label, /<input\b[^>]*\/?>/);
+  expect(classesOf(input)).toContain("sr-only");
+  expect(input).toContain('type="file"');
+  expect(input).not.toContain("tabindex");
+  expect(input).not.toMatch(/\bhidden\b/);
+ });
+
+ it("marks a failed file in the error colour and a ready one apart from it", async () => {
+  const html = await fullEditor();
+  const failed = tagWith(html, /<li\b[^>]*data-status="failed"[^>]*>/);
+  const ready = tagWith(html, /<li\b[^>]*data-status="ready"[^>]*>/);
+  expect(classesOf(failed)).toContain("text-red");
+  expect(classesOf(ready)).not.toContain("text-red");
+  expect(classesOf(ready)).toContain("text-[color:var(--color-positive)]");
+ });
+
+ it("labels each section with the eyebrow heading, styles the checkboxes, and keeps long words inside 320 px", async () => {
+  const html = await fullEditor();
+  for (const heading of ["Active today", "Pending"]) expect(classesOf(tagWith(html, new RegExp(`<h3\\b[^>]*>${heading}</h3>`))), heading).toContain("eyebrow");
+  expect(classesOf(tagWith(html, /<legend\b[^>]*>/))).toContain("eyebrow");
+  expect(classesOf(tagWith(html, /<fieldset\b[^>]*>/))).toContain("min-w-0");
+  const boxes = html.match(/<input\b[^>]*type="checkbox"[^>]*\/?>/g) ?? [];
+  expect(boxes.length).toBe(3);
+  for (const box of boxes) expect(classesOf(box)).toContain("accent-[color:var(--color-accent)]");
+  expect(html).toContain("wrap-anywhere");
+ });
+
+ it("keeps every string the editor showed before", async () => {
+  const text = textOf(await fullEditor());
+  for (const s of [
+   "Optional: choose 3–5 distinct papers that represent your interests. One to five works. These private PDFs are separate from your reading uploads; no AI report is created.",
+   "Without seed papers, your briefing uses your other preferences. Seed matching is an initial approach, not a quality guarantee.",
+   "Active today", "2026-11-01 · America/Chicago", "Pending", "Effective 2026-11-02 · America/Chicago", "Undo pending changes",
+   "Next pool (2/5)", "Removing a paper here changes the next pool; it is not a dislike and does not delete the PDF.",
+   "Paper a", "Topic: soil", "Research object: roots", "Methods: imaging", "Forget this PDF and its recommendations",
+   "Permanently forget this seed PDF and its derived recommendations? Notes and your reading library will not be deleted.",
+   "Confirm forget", "Cancel", "I have the right to upload these PDFs for private processing.", "Add PDFs",
+   "one.pdf: ready", "two.pdf: failed — This PDF has no readable text.", "Save pool",
+   "Recommendation use has been revoked for 1 paper. File cleanup is pending.", "Retry file cleanup 1",
+  ]) expect(text, s).toContain(s);
+ });
+
+ it("styles the signed-out sign-in buttons and the unavailable state's Retry as pills", async () => {
+  account.authOutcome = "signed-out"; account.authUserId = null;
+  const out = renderToStaticMarkup(SeedPool({}) as ReactElement);
+  for (const label of ["Sign in with Google", "Sign in with GitHub"]) expect(classesOf(buttonTag(out, label)), label).toEqual(expect.arrayContaining(["rounded-full", "bg-surface", TOUCH_FLOOR]));
+  expect(textOf(out)).toContain("Sign in to add seed papers. You can skip this optional step.");
+  api.get.mockRejectedValue(new Error("down"));
+  const failed = await hookRuntime.mount(() => OwnerSeedPool({}));
+  const html = renderToStaticMarkup(failed.value as ReactElement);
+  failed.unmount();
+  expect(textOf(html)).toContain("Seed papers are unavailable. Try again.");
+  expect(classesOf(buttonTag(html, "Retry"))).toEqual(expect.arrayContaining(["rounded-full", TOUCH_FLOOR]));
+ });
 });
