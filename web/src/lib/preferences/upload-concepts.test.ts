@@ -312,8 +312,8 @@ describe("R-C3 method recognition beyond materials science", () => {
     expect(facet(cases[3][0], "nitrate flux")).toBe("material");
   });
 
-  it("leaves the extraction version at 14 (manager ruling: cue lists only)", () => {
-    expect(UPLOAD_CONCEPT_EXTRACTION_VERSION).toBe(14);
+  it("did not bump the extraction version itself (manager ruling: cue lists only); R-C3b took it past 14", () => {
+    expect(UPLOAD_CONCEPT_EXTRACTION_VERSION).toBeGreaterThan(14);
   });
 });
 
@@ -361,5 +361,19 @@ describe("R-C3b no facet label holds a verb (W20)", () => {
       "near infrared spectra", "doped cathode", "maintained capacity", "particle speed", "electrochemical cycling"]) expect(holdsVerb(label), label).toBe(false);
     for (const term of KNOWN_PARTICIPLE_TERMS) expect(holdsVerb(term), term).toBe(false);
     for (const word of PHRASE_BOUNDARY_WORDS) expect(holdsVerb(`canopy ${word} water`), word).toBe(true);
+  });
+});
+
+// W20 R-C3b ruling 2: the cached reading of an upload is keyed by this
+// number, and a reading kept under 14 was made by the extractor whose
+// concepts still held verbs. 15 retires it: the next open is a cache miss
+// that reads the stored PDF again (nothing is deleted).
+describe("the extraction version after verb-holding phrases left the facets (R-C3b)", () => {
+  it("is 15", () => {
+    expect(UPLOAD_CONCEPT_EXTRACTION_VERSION).toBe(15);
+  });
+
+  it("stamps 15 on every concept it extracts", () => {
+    expect(extractUploadConcepts(doc).every((c) => c.extractionVersion === 15)).toBe(true);
   });
 });

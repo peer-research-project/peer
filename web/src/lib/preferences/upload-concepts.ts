@@ -36,7 +36,11 @@ import { ABBREVIATION_GROUPS, canonicalize, isGenericTerm } from "@/lib/scoring/
 // 13 (P10-42): a block with no sentence end joins the next across a page break or a floating figure whatever the
 // next word (unless it opens a heading or a list); text cached under 12 cuts such a sentence at a capital.
 // 14: reread PDFs with narrow gutters and repeated four-line footers.
-export const UPLOAD_CONCEPT_EXTRACTION_VERSION = 14;
+// 15 (R-C3b, W20): no concept label holds a verb (`holdsVerb`). The PDF reading itself is unchanged, so the
+// bump only makes the server read each upload's text once more (a cache miss on the 14 key, then the stored
+// PDF is read and the sidecar is rewritten under 15); nothing is deleted. Concepts already stored on an upload
+// or a seed are not recomputed by it.
+export const UPLOAD_CONCEPT_EXTRACTION_VERSION = 15;
 
 // A conservative, local phrase extractor. No document text is sent to a model
 // for preference learning. References, author blocks and boilerplate are out.
