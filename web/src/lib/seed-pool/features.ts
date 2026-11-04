@@ -67,21 +67,32 @@ export function isSeedBoilerplate(label: string): boolean {
 }
 
 /**
- * R-C3c (W23, 2026-11-04): a boilerplate word at the edge of a seed facet
- * label ("example denser foliage", from "In this synthetic example denser
- * foliage…") is trimmed off: "denser foliage". Only whole words from
- * SEED_BOILERPLATE_WORDS at the start or end go; inner words are never
- * touched and no word is added. The trimmed label stays only if it still has
- * at least two words, is not itself boilerplate and holds no verb; otherwise
- * the label is dropped (undefined). A label with no edge boilerplate word is
- * returned unchanged. Seed facets only: upload concepts keep their labels.
+ * R-C3d (W23, 2026-11-04): the closed set of discourse pointers trimmed from
+ * seed facet label edges. They point at the text ("this", "example") and are
+ * never the head or modifier of a domain term at a label edge. The other
+ * SEED_BOILERPLATE_WORDS are not trimmed at edges: they also open or close
+ * real terms ("synthetic aperture radar", "case study", "climate data",
+ * "test bench").
+ */
+export const SEED_EDGE_POINTER_WORDS: readonly string[] = ["example", "examples", "this"];
+const SEED_EDGE_POINTER_SET = new Set(SEED_EDGE_POINTER_WORDS);
+/**
+ * R-C3c narrowed by R-C3d (W23, 2026-11-04): a pointer word at the edge of a
+ * seed facet label ("example denser foliage", from "In this synthetic
+ * example denser foliage…") is trimmed off: "denser foliage". Only whole
+ * words from SEED_EDGE_POINTER_WORDS at the start or end go; inner words are
+ * never touched and no word is added. The trimmed label stays only if it
+ * still has at least two words, is not itself boilerplate and holds no verb;
+ * otherwise the label is dropped (undefined). A label with no edge pointer
+ * word is returned unchanged. Seed facets only: upload concepts keep their
+ * labels.
  */
 export function trimSeedEdgeBoilerplate(label: string): string | undefined {
   const words = label.split(/\s+/).filter(Boolean);
   let start = 0;
   let end = words.length;
-  while (start < end && SEED_BOILERPLATE_WORDS.has(words[start].toLowerCase())) start += 1;
-  while (end > start && SEED_BOILERPLATE_WORDS.has(words[end - 1].toLowerCase())) end -= 1;
+  while (start < end && SEED_EDGE_POINTER_SET.has(words[start].toLowerCase())) start += 1;
+  while (end > start && SEED_EDGE_POINTER_SET.has(words[end - 1].toLowerCase())) end -= 1;
   if (start === 0 && end === words.length) return label;
   if (end - start < 2) return undefined;
   const trimmed = words.slice(start, end).join(" ");
