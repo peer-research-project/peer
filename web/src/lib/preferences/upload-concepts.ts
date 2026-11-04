@@ -113,8 +113,10 @@ function isAcceptableCandidate(label: string): boolean {
 // faces every other gate (a single word must be a known domain term), and no
 // score or weight changes. A verb inside a phrase ("density affects water")
 // is outside this rule.
-const BOUNDARY_WORDS = new Set(("affects affect affected using used shows show is are was were " +
+// Exported for R-C18 (W11): a seed reason never quotes a phrase holding one of these words anywhere.
+export const PHRASE_BOUNDARY_WORDS: ReadonlySet<string> = new Set(("affects affect affected using used shows show is are was were " +
   "of for with and the a an to in on after under than how").split(" "));
+const BOUNDARY_WORDS = PHRASE_BOUNDARY_WORDS;
 
 function endsOnFunctionWord(label: string): boolean {
   const tokens = label.split(" ");

@@ -91,3 +91,42 @@ describe("R-C18 grounded, informative seed reason phrases", () => {
     expect(matchSeed("Water retention by the forest canopy: canopy water after rain", s).reasonPhrases).toEqual(["water retention", "canopy water"]);
   });
 });
+
+// W11 R-C18 (Round-1 scorecard C18): a seed reason never quotes a phrase that
+// still holds a verb-like token from the R-P1 boundary list anywhere in it
+// ("density affects water", "retention after rain"). The cleanest matched
+// phrases lead; a verb-holding phrase that is still needed is named as its
+// words ("the terms density and water"). Every word named is in the candidate,
+// and the hits behind admission are unchanged.
+describe("R-C18 seed reasons read grammatically (W11)", () => {
+  const BOUNDARY = new Set("affects affect affected using used shows show is are was were of for with and the a an to in on after under than how".split(" "));
+  // A phrase quotes a verb-like token when one remains after the "the terms" lead-in ("and" there is the list joiner).
+  const quotesVerb = (phrase: string) => phrase.replace(/^the terms? /, "").split(/\s+/).some((word) => BOUNDARY.has(word) && word !== "and");
+  const canopy: MatchingSeed = { id: "c", canonicalKey: "sha256:c", features: {
+    topic: ["density affects water", "retention after rain", "forest canopy water", "leaf canopy density"], object: [], method: [] } };
+  const text = "Leaf canopy density affects water retention after rain in forest canopy water studies.";
+
+  it("prefers clean phrases over verb-holding ones, keeping the hits behind admission", () => {
+    const match = matchSeed(text, canopy);
+    expect(match.reasonPhrases).toEqual(["forest canopy water", "leaf canopy density"]);
+    expect(match.hits.map((hit) => hit.phrase)).toEqual(canopy.features.topic);
+    expect(admitsBySeed(match)).toBe(admitsBySeed({ ...match, reasonPhrases: [] }));
+  });
+
+  it("names a verb-holding phrase only as its words when nothing cleaner covers it", () => {
+    const only: MatchingSeed = { id: "o", canonicalKey: "sha256:o", features: { topic: ["density affects water", "retention after rain"], object: [], method: [] } };
+    const match = matchSeed("Canopy density affects water retention after rain.", only);
+    expect(match.reasonPhrases).toEqual(["the terms density and water", "the terms retention and rain"]);
+    for (const phrase of match.reasonPhrases) expect(quotesVerb(phrase), phrase).toBe(false);
+    const candidate = new Set("canopy density affects water retention after rain".split(" "));
+    for (const phrase of match.reasonPhrases) for (const word of phrase.replace(/^the terms /, "").split(/, | and /)) expect(candidate.has(word), word).toBe(true);
+  });
+
+  it("never quotes a boundary word inside a phrase, whatever the facet order", () => {
+    const mixed: MatchingSeed = { id: "m", canonicalKey: "sha256:m", features: {
+      topic: ["canopy moisture"], object: ["concentration affects cycling"], method: ["field sensors"] } };
+    const match = matchSeed("Concentration affects cycling; canopy moisture from field sensors.", mixed);
+    expect(match.reasonPhrases.length).toBeGreaterThan(0);
+    for (const phrase of match.reasonPhrases) expect(quotesVerb(phrase), phrase).toBe(false);
+  });
+});

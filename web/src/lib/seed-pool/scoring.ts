@@ -1,6 +1,7 @@
 import { buildIndex, scoreTfidf } from "@/lib/scoring/tfidf";
 import type { RawItem } from "@/lib/sources/types";
 import { tokenizeFolded } from "@/lib/scoring/tokenize";
+import { PHRASE_BOUNDARY_WORDS } from "@/lib/preferences/upload-concepts";
 
 /** This shape describes only extracted matching facets, never PDF text. */
 export interface SeedFacets { topic: readonly string[]; object: readonly string[]; method: readonly string[] }
@@ -28,7 +29,7 @@ export function matchSeed(candidateText: string, seed: MatchingSeed): SeedMatch 
   const tokens = tokenizeFolded(candidateText);
   const candidate = new Set(tokens);
   const hits: FacetHit[] = [];
-  const ranked: { facetScore: number; contiguous: boolean; parts: string[]; text: string }[] = [];
+  const ranked: RankedPhrase[] = [];
   let score = 0;
   const facets = FACETS.map(({ name, weight }) => {
     const phrases = [...new Set(seed.features[name].map((v) => v.trim()).filter(Boolean))];
@@ -52,7 +53,16 @@ export function matchSeed(candidateText: string, seed: MatchingSeed): SeedMatch 
       if (!parts.length || !parts.every((part) => candidate.has(part))) continue;
       const contiguous = tokens.some((_, i) => parts.every((part, j) => tokens[i + j] === part));
       hits.push({ facet: name, phrase: contiguous ? phrase : parts.join(" / ") });
-      ranked.push({ facetScore, contiguous, parts, text: contiguous ? phrase : `the terms ${listWords([...new Set(parts)])}` });
+      // R-C18 (W11): a phrase holding a verb-like boundary word anywhere
+      // ("density affects water") is never quoted as written; it is named by
+      // its other words, and ranks after every clean phrase of its facet.
+      const clean = !phrase.toLowerCase().split(/\s+/).concat(parts).some((word) => PHRASE_BOUNDARY_WORDS.has(word));
+      if (clean) {
+        ranked.push({ facetScore, clean, contiguous, parts, text: contiguous ? phrase : `the terms ${listWords([...new Set(parts)])}` });
+      } else {
+        const words = [...new Set(parts.filter((part) => !PHRASE_BOUNDARY_WORDS.has(part)))];
+        if (words.length) ranked.push({ facetScore, clean, contiguous, parts: words, text: words.length === 1 ? `the term ${words[0]}` : `the terms ${listWords(words)}` });
+      }
     }
   }
   return { seedId: seed.id, canonicalKey: seed.canonicalKey, score: hits.length ? clamp(score) : 0, hits, reasonPhrases: reasonPhrases(ranked) };
@@ -60,13 +70,16 @@ export function matchSeed(candidateText: string, seed: MatchingSeed): SeedMatch 
 
 const listWords = (words: readonly string[]) => words.length < 2 ? words.join("") : `${words.slice(0, -1).join(", ")} and ${words[words.length - 1]}`;
 
+interface RankedPhrase { facetScore: number; clean: boolean; contiguous: boolean; parts: string[]; text: string }
+
 /** R-C18: the strongest facet first (an object or method beats a weaker
- * topic), then a phrase found as written before scattered words, then the
+ * topic), then a phrase with no verb-like boundary word before one that has
+ * it (W11), then a phrase found as written before scattered words, then the
  * longer phrase; skip a phrase whose words a chosen phrase already covers. */
-function reasonPhrases(ranked: { facetScore: number; contiguous: boolean; parts: string[]; text: string }[]): string[] {
+function reasonPhrases(ranked: RankedPhrase[]): string[] {
   const chosen: string[] = [];
   const covered = new Set<string>();
-  const order = [...ranked].sort((a, b) => b.facetScore - a.facetScore
+  const order = [...ranked].sort((a, b) => b.facetScore - a.facetScore || Number(b.clean) - Number(a.clean)
     || Number(b.contiguous) - Number(a.contiguous) || b.parts.length - a.parts.length);
   for (const hit of order) {
     if (chosen.length === 2) break;
