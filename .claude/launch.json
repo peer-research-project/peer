@@ -8,6 +8,14 @@
       "runtimeArgs": ["run", "dev"],
       "port": 3000,
       "autoPort": false
+    },
+    {
+      "name": "peer-web-test-target",
+      "cwd": "web",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["scripts/dev-test-target.mjs"],
+      "port": 3000,
+      "autoPort": false
     }
   ]
 }
