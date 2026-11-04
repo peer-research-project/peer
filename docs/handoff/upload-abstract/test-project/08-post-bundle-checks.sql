@@ -2,7 +2,7 @@
 -- READ ONLY catalog checks, to run in the peer-test project (cbsbtkvbmvyznerbpmxg)
 -- AFTER 00 passed and the canonical bundle
 -- docs/handoff/upload-abstract/sql-runtime/seed-closure-canonical-lf.sql
--- (SHA-256 F1D16D710C9B451CE90F5F3254B80DFE9D0A566779EC2485C51207BAEAC5745A)
+-- (SHA-256 A7878BF3A92587B653159604AED6DF0F959207A9C36958E686729EB215120A1B (R-C11 bundle, 2026-11-04; supersedes F1D16D…5745A))
 -- committed. Reads catalogs only, plus row COUNTS (not rows) of
 -- briefing_deliveries and the new tables. Writes nothing.
 --
