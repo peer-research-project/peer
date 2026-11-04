@@ -1,7 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ExtractedDocument } from "@/lib/papers/html-text";
 import { extractUploadConcepts } from "@/lib/preferences/upload-concepts";
-import { SEED_BOILERPLATE_PHRASES, SEED_CONDITION_PHRASES, isSeedBoilerplate, seedFromExtractedDocument, verifiedPublicDoi } from "./features";
+import { SEED_BOILERPLATE_PHRASES, SEED_CONDITION_PHRASES, isSeedBoilerplate, seedFromExtractedDocument, trimSeedEdgeBoilerplate, verifiedPublicDoi } from "./features";
+// Calls through to the real extractor; one W23 case swaps in a fixed concept list once.
+vi.mock("@/lib/preferences/upload-concepts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/preferences/upload-concepts")>();
+  return { ...actual, extractUploadConcepts: vi.fn(actual.extractUploadConcepts) };
+});
 const doc: ExtractedDocument = { title: "Fictional Sodium Cathode Study", source: "pdf", figureCaptions: [], sections: [{ id: "s0", heading: "Methods", canonical: "methods", text: "Sodium cathode materials were tested using microscopy and diffraction. ".repeat(10) }] };
 afterEach(() => vi.unstubAllGlobals());
 describe("private seed features", () => {
@@ -64,5 +69,43 @@ describe("R-C6d generic condition phrases are seed boilerplate (W21)", () => {
       expect(isSeedBoilerplate(`under ${phrase}`)).toBe(true);
     }
     for (const label of ["standard conditions", "boundary conditions", "initial conditions", "reaction conditions", "conditions", "identical twins", "canopy conditions"]) expect(isSeedBoilerplate(label)).toBe(false);
+  });
+});
+
+describe("R-C3c boilerplate words trimmed from seed facet label edges (W23)", () => {
+  // Invented text shaped like the fictional canopy fixture's "In this synthetic example denser foliage…" sentence.
+  const foliage: ExtractedDocument = { title: "Fictional Foliage Study", source: "pdf", figureCaptions: [], sections: [{ id: "s0", heading: "Results", canonical: "results", text: "In this synthetic example denser foliage retained water after rain. Canopy moisture and leaf canopy density were measured with field sensors. ".repeat(6) }] };
+  const edgeWord = /^(?:test|data|real|experiments?|synthetic|examples?|this|paper|study|results?)|(?:test|data|real|experiments?|synthetic|examples?|this|paper|study|results?)$/;
+  it("seeds 'denser foliage' where the upload concept reads 'example denser foliage', and leaves the upload concept alone", () => {
+    expect(extractUploadConcepts(foliage).map((c) => c.label)).toContain("example denser foliage");
+    const seed = seedFromExtractedDocument(foliage, Buffer.from("foliage-edge"));
+    if (!seed) throw new Error("Expected a readable seed");
+    const all = [...seed.features.topic, ...seed.features.object, ...seed.features.method];
+    expect(seed.features.topic).toContain("denser foliage");
+    expect(all).not.toContain("example denser foliage");
+    for (const label of all) expect(label).not.toMatch(edgeWord);
+    expect(all).toEqual(expect.arrayContaining(["leaf canopy density", "canopy moisture", "field sensors"]));
+  });
+  it("trims only edge words, keeps two-word remainders, and drops what is too short, boilerplate or verb-holding", () => {
+    expect(trimSeedEdgeBoilerplate("example denser foliage")).toBe("denser foliage");
+    expect(trimSeedEdgeBoilerplate("denser foliage example")).toBe("denser foliage");
+    expect(trimSeedEdgeBoilerplate("this example denser foliage results")).toBe("denser foliage");
+    expect(trimSeedEdgeBoilerplate("canopy example density")).toBe("canopy example density");
+    expect(trimSeedEdgeBoilerplate("leaf canopy density")).toBe("leaf canopy density");
+    expect(trimSeedEdgeBoilerplate("example foliage")).toBeUndefined();
+    expect(trimSeedEdgeBoilerplate("foliage data")).toBeUndefined();
+    expect(trimSeedEdgeBoilerplate("example test bench data")).toBeUndefined();
+    expect(trimSeedEdgeBoilerplate("example foliage using sensors")).toBeUndefined();
+    expect(trimSeedEdgeBoilerplate("example using sensors")).toBeUndefined();
+  });
+  it("keeps one label when the trimmed label repeats one already in the same facet", () => {
+    vi.mocked(extractUploadConcepts).mockReturnValueOnce([
+      { key: "a", label: "denser foliage", source: "uploaded_article", facet: "topic" },
+      { key: "b", label: "example denser foliage", source: "uploaded_article", facet: "topic" },
+      { key: "c", label: "denser foliage data", source: "uploaded_article", facet: "topic" },
+      { key: "d", label: "canopy moisture", source: "uploaded_article", facet: "topic" },
+    ]);
+    const seed = seedFromExtractedDocument(foliage, Buffer.from("foliage-dup"));
+    expect(seed?.features.topic).toEqual(["denser foliage", "canopy moisture"]);
   });
 });

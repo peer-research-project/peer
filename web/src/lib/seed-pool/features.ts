@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { ExtractedDocument } from "@/lib/papers/html-text";
 import { hasReadableText } from "@/lib/papers/readability";
-import { extractUploadConcepts } from "@/lib/preferences/upload-concepts";
+import { extractUploadConcepts, holdsVerb } from "@/lib/preferences/upload-concepts";
 import { normalizePreferenceLabel } from "@/lib/preferences/ledger";
 import type { SeedPaper } from "./types";
 
@@ -67,6 +67,29 @@ export function isSeedBoilerplate(label: string): boolean {
 }
 
 /**
+ * R-C3c (W23, 2026-11-04): a boilerplate word at the edge of a seed facet
+ * label ("example denser foliage", from "In this synthetic example denser
+ * foliage…") is trimmed off: "denser foliage". Only whole words from
+ * SEED_BOILERPLATE_WORDS at the start or end go; inner words are never
+ * touched and no word is added. The trimmed label stays only if it still has
+ * at least two words, is not itself boilerplate and holds no verb; otherwise
+ * the label is dropped (undefined). A label with no edge boilerplate word is
+ * returned unchanged. Seed facets only: upload concepts keep their labels.
+ */
+export function trimSeedEdgeBoilerplate(label: string): string | undefined {
+  const words = label.split(/\s+/).filter(Boolean);
+  let start = 0;
+  let end = words.length;
+  while (start < end && SEED_BOILERPLATE_WORDS.has(words[start].toLowerCase())) start += 1;
+  while (end > start && SEED_BOILERPLATE_WORDS.has(words[end - 1].toLowerCase())) end -= 1;
+  if (start === 0 && end === words.length) return label;
+  if (end - start < 2) return undefined;
+  const trimmed = words.slice(start, end).join(" ");
+  if (isSeedBoilerplate(trimmed) || holdsVerb(trimmed.toLowerCase())) return undefined;
+  return trimmed;
+}
+
+/**
  * R-T1 (W9, 2026-11-04): the PDF's Info /Title, when it names the paper. A
  * title line set in the body's own size gives no layout title (`doc.title`);
  * the Info /Title then stands in, unless it is empty, longer than 300
@@ -89,8 +112,10 @@ export function seedFromExtractedDocument(doc: ExtractedDocument, bytes: Buffer,
   const features: SeedPaper["features"] = { topic: [], object: [], method: [] };
   for (const concept of extractUploadConcepts(doc)) {
     if (isSeedBoilerplate(concept.label)) continue;
+    const label = trimSeedEdgeBoilerplate(concept.label);
+    if (!label) continue;
     const facet = concept.facet === "method" ? "method" : concept.facet === "material" ? "object" : "topic";
-    if (!features[facet].includes(concept.label)) features[facet].push(concept.label);
+    if (!features[facet].includes(label)) features[facet].push(label);
   }
   if (!features.topic.length && !features.object.length && !features.method.length) return null;
   const id = randomUUID();
