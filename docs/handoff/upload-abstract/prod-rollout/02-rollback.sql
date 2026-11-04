@@ -64,6 +64,10 @@
 --                                  Same steps; the block then completes and commits.
 --                                  The SELECT after the block reports the new stage,
 --                                  which must read "pre-bundle".
+-- FAIL CLOSED: a NULL or unknown v_mode / v_target is REFUSED before anything else
+-- runs; NULL in either boolean setting counts as false; the block can commit only
+-- when v_mode is exactly 'execute' AND v_target is exactly 'production'. Any other
+-- value ends in the dry-run error, so a typo can never commit.
 -- lock_timeout is 5 s for this transaction: if the old app holds briefing_deliveries
 -- longer, the block fails with lock_not_available and changes nothing; re-run later.
 -- PostgREST reloads its schema cache by itself (event triggers pgrst_ddl_watch /
@@ -99,6 +103,16 @@ DECLARE
   v_left      text[];
 BEGIN
   PERFORM set_config('lock_timeout', '5s', true);
+
+  -- [0] Operator settings: NULL or unknown values fail closed, before anything else --
+  IF v_mode IS NULL OR v_mode NOT IN ('dry-run', 'execute') THEN
+    RAISE EXCEPTION 'REFUSED: v_mode must be ''dry-run'' or ''execute'' (got %).', coalesce(quote_literal(v_mode), 'NULL');
+  END IF;
+  IF v_target IS NULL OR v_target NOT IN ('production', 'peer-test-rehearsal') THEN
+    RAISE EXCEPTION 'REFUSED: v_target must be ''production'' or ''peer-test-rehearsal'' (got %).', coalesce(quote_literal(v_target), 'NULL');
+  END IF;
+  v_allow_drop_observed_day_markers := coalesce(v_allow_drop_observed_day_markers, false);
+  v_storage_checked_in_ui := coalesce(v_storage_checked_in_ui, false);
 
   -- [1] Target guard ---------------------------------------------------------------
   IF v_target = 'production' THEN
@@ -143,7 +157,7 @@ BEGIN
   ELSE
     RAISE EXCEPTION 'REFUSED: v_target must be ''production'' or ''peer-test-rehearsal'' (got %).', v_target;
   END IF;
-  IF v_mode NOT IN ('dry-run', 'execute') THEN
+  IF v_mode IS NULL OR v_mode NOT IN ('dry-run', 'execute') THEN
     RAISE EXCEPTION 'REFUSED: v_mode must be ''dry-run'' or ''execute'' (got %).', v_mode;
   END IF;
 
@@ -266,7 +280,8 @@ BEGIN
   END IF;
 
   -- [6] Dry run ends here, on purpose --------------------------------------------------
-  IF v_mode = 'dry-run' THEN
+  -- Fail closed: anything other than exactly 'execute' on 'production' rolls back.
+  IF v_mode IS DISTINCT FROM 'execute' OR v_target IS DISTINCT FROM 'production' THEN
     RAISE EXCEPTION 'PEER_ROLLBACK_DRY_RUN_OK (intentional error; everything rolled back, nothing changed): %',
       jsonb_build_object('target', v_target, 'r3_blockers', v_blockers, 'counts', v_counts,
                          'briefing_deliveries_rows_before_and_after', v_bd_before,
