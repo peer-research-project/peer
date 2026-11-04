@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * Start `next dev -p 3000` against the ISOLATED Supabase test project
+ * Start `next dev -p 3000` -- or, with --prod, `next build` then
+ * `next start -p 3000` -- against the ISOLATED Supabase test project
  * `peer-test` (ref cbsbtkvbmvyznerbpmxg), never against production.
  *
  * Why this exists
@@ -39,10 +40,27 @@
  *     (Tier 0 or the reader's own key only), even if the test file sets one.
  *  6. Unless --dry-run: runs the same orphan cleanup as `predev`, then spawns
  *     `node node_modules/next/dist/bin/next dev -p 3000` directly (no shell).
+ *     With --prod it spawns `next build` instead and, only if the build exits
+ *     0, `next start -p 3000`; both get the same overridden environment.
+ *     --dry-run prints the planned command(s) and starts nothing.
+ *
+ * Why --prod exists: a dev-server-only symptom (a same-tab reload that stays on
+ * the route loading screen while a new tab renders) has to be told apart from
+ * a product bug, so the same isolated target must be runnable as a production
+ * build. Notes for --prod:
+ *  - NEXT_PUBLIC_* values are inlined into the client bundle AT BUILD TIME, so
+ *    the build itself must see the overridden environment (it does).
+ *  - The build replaces web/.next's production output (dev uses .next/dev in
+ *    Next 16, so a dev server's files are not touched). A later plain
+ *    `npm run start` would serve this test-target bundle: rebuild with
+ *    `npm run build` before using `next start` for anything else.
+ *  - A NODE_ENV inherited from the shell is removed so Next sets "production"
+ *    itself for both commands.
+ *  - `npm run build`'s prebuild guard is not run: it only checks Vercel builds.
  *
  * It never prints a value: only the Supabase host and variable NAMES.
  *
- * Usage:  node scripts/dev-test-target.mjs [--dry-run] [--env-file <path>]
+ * Usage:  node scripts/dev-test-target.mjs [--prod] [--dry-run] [--env-file <path>]
  */
 
 import { execFileSync, spawn } from "node:child_process";
@@ -144,10 +162,11 @@ function refuse(message) {
 }
 
 function parseArgs(argv) {
-  const out = { dryRun: false, envFile: defaultEnvFile, envFileGiven: false };
+  const out = { dryRun: false, prod: false, envFile: defaultEnvFile, envFileGiven: false };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--dry-run") out.dryRun = true;
+    else if (arg === "--prod") out.prod = true;
     else if (arg === "--env-file") {
       const next = argv[i + 1];
       if (!next) refuse("--env-file needs a path");
@@ -155,7 +174,7 @@ function parseArgs(argv) {
       out.envFileGiven = true;
       i += 1;
     } else if (arg === "--help" || arg === "-h") {
-      console.log("Usage: node scripts/dev-test-target.mjs [--dry-run] [--env-file <path>]");
+      console.log("Usage: node scripts/dev-test-target.mjs [--prod] [--dry-run] [--env-file <path>]");
       process.exit(0);
     } else refuse(`unknown argument ${JSON.stringify(arg)}`);
   }
@@ -244,6 +263,7 @@ if (serverKey === browserKey) refuse("the publishable key and the service-role k
 // ── 4/5. Build the child environment ─────────────────────────────────────
 const childEnv = { ...process.env };
 delete childEnv.__NEXT_PROCESSED_ENV;
+if (args.prod) delete childEnv.NODE_ENV;
 
 const report = { fromFile: [], ignoredFromFile: [], blanked: [], defaulted: [], forced: [] };
 
@@ -289,25 +309,51 @@ console.log("[dev-test-target] these override web/.env.local (process.env is con
 // ── 6. Start (or not) ────────────────────────────────────────────────────
 const require = createRequire(import.meta.url);
 const nextBin = require.resolve("next/dist/bin/next");
-const command = [process.execPath, nextBin, "dev", "-p", PORT];
+const nextRel = path.relative(webDir, nextBin);
+/** Each step: [label, argv after `node <next>`]. --prod: build, then start only if the build exits 0. */
+const steps = args.prod
+  ? [["build", ["build"]], ["start", ["start", "-p", PORT]]]
+  : [["dev", ["dev", "-p", PORT]]];
+console.log(`[dev-test-target] mode: ${args.prod ? "production (next build, then next start)" : "development (next dev)"}`);
 
 if (args.dryRun) {
-  console.log(`[dev-test-target] DRY RUN: would run orphan cleanup, then: node ${path.relative(webDir, nextBin)} dev -p ${PORT} (cwd web/). Nothing started.`);
+  const plan = steps.map(([, argv], i) => `${i ? "if it exits 0, " : ""}node ${nextRel} ${argv.join(" ")}`).join("; then ");
+  console.log(`[dev-test-target] DRY RUN: would run orphan cleanup, then: ${plan} (cwd web/). Nothing started.`);
   process.exit(0);
 }
 
 try {
   execFileSync(process.execPath, [path.join(scriptDir, "kill-dev-orphans.mjs")], { cwd: webDir, stdio: "inherit" });
 } catch {
-  console.warn("[dev-test-target] orphan cleanup failed; continuing (next dev will report a busy port).");
+  console.warn(`[dev-test-target] orphan cleanup failed; continuing (next ${args.prod ? "start" : "dev"} will report a busy port).`);
 }
 
-const child = spawn(command[0], command.slice(1), { cwd: webDir, env: childEnv, stdio: "inherit" });
+let child = null;
+let stopping = false;
 const forward = (signal) => {
-  if (!child.killed) child.kill(signal);
+  stopping = true;
+  if (child && !child.killed) child.kill(signal);
+  else process.exit(1);
 };
 process.on("SIGINT", () => forward("SIGINT"));
 process.on("SIGTERM", () => forward("SIGTERM"));
-child.on("exit", (code, signal) => {
-  process.exit(code ?? (signal ? 1 : 0));
-});
+
+/** Runs one Next command with the overridden env; resolves to its exit code (1 when killed by a signal). */
+function run(argv) {
+  return new Promise((resolve) => {
+    child = spawn(process.execPath, [nextBin, ...argv], { cwd: webDir, env: childEnv, stdio: "inherit" });
+    child.on("exit", (code, signal) => {
+      child = null;
+      resolve(code ?? (signal ? 1 : 0));
+    });
+  });
+}
+
+for (const [label, argv] of steps) {
+  const code = await run(argv);
+  const last = label === steps[steps.length - 1][0];
+  if (code !== 0 || stopping || last) {
+    if (code !== 0 && !last && !stopping) console.error(`[dev-test-target] next ${label} exited ${code}; not starting the server.`);
+    process.exit(code);
+  }
+}
