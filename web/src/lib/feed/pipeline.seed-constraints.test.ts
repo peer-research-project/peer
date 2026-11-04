@@ -24,13 +24,17 @@ async function run(pool: RawItem[], venues?: string[]) {
 
 it("caps one first author at two of the seeded top slots, like the no-seed path", async () => {
   const pool = [
-    item("same-1", "Glacier meltwater in a moraine lake by dye tracing", "Dr. Invented Same"),
-    item("same-2", "Dye tracing of glacier meltwater through a moraine lake", "Dr. Invented Same"),
-    item("same-3", "Moraine lake glacier meltwater pathways from dye tracing", "Dr. Invented Same"),
-    item("other", "Glacier meltwater storage in a moraine lake", "Dr. Invented Other"),
+    item("same-1", "Glacier meltwater, moraine lake, dye tracing", "Dr. Invented Same"),
+    item("same-2", "Dye tracing, glacier meltwater, moraine lake", "Dr. Invented Same"),
+    item("same-3", "Moraine lake, dye tracing, glacier meltwater", "Dr. Invented Same"),
+    item("other", "Glacier meltwater storage beside a moraine lake during a long survey of summer roads and village markets", "Dr. Invented Other"),
   ];
   const res = await run(pool);
   const authors = res.items.map((i) => i.authors[0]);
+  // All three same-author papers outscore "other" (full seed match, equal
+  // intent), yet the cap defers the third one below it.
+  expect(res.items[3]?.authors[0]).toBe("Dr. Invented Same");
+  expect(Math.min(...res.items.filter((i) => i.id.startsWith("same")).map((i) => i.score))).toBeGreaterThan(res.items.find((i) => i.id === "other")!.score);
   expect(res.items.map((i) => i.id)).toContain("other");
   expect(authors.slice(0, 3).filter((a) => a === "Dr. Invented Same")).toHaveLength(2);
   expect(authors.slice(0, 3)).toContain("Dr. Invented Other");
