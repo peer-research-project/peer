@@ -259,3 +259,32 @@ describe("FirstRunGate — a set-up account that signs in leaves the walkthrough
     expect(world.clearReturningAccount).not.toHaveBeenCalled();
   });
 });
+
+// R-ONB-1 rule 4: "First-time visitors and brand-new accounts still get the
+// walkthrough once from '/', unchanged." Proven with the W27 code in place:
+// the returning-account path neither fires nor stands in the way of it.
+describe("FirstRunGate — first-time visitors still get the walkthrough once from / (W27, R-ONB-1 rule 4)", () => {
+  beforeEach(() => {
+    world.pathname = "/";
+    world.hydrated = true;
+    world.syncSettled = true;
+    world.profile = { ...defaultProfile };
+    world.returningAccount = false;
+    world.replace.mockReset();
+    world.completeOnboarding.mockReset();
+    world.clearReturningAccount.mockReset();
+    world.skipWelcome.mockReset();
+    world.skipWelcome.mockImplementation(() => {
+      world.profile = { ...world.profile, welcomeSkipped: true };
+    });
+  });
+
+  it("(e) a first-time visitor at / is sent to /welcome, once, and nothing else is done", async () => {
+    await open("/");
+    await open("/");
+    expect(world.replace).toHaveBeenCalledTimes(1);
+    expect(world.replace).toHaveBeenCalledWith("/welcome");
+    expect(world.completeOnboarding).not.toHaveBeenCalled();
+    expect(world.clearReturningAccount).not.toHaveBeenCalled();
+  });
+});
