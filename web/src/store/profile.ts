@@ -179,6 +179,8 @@ interface ProfileState {
    * dialog's "removes your keys" always holds.
    */
   clearDeviceKeys: () => void;
+  /** Reset the local profile to defaults (with lastSynced and the owner id).
+   *  The device's `welcomeSkipped` flag survives (W27, R-ONB-1 rule 3). */
   logOut: () => void;
 }
 
@@ -771,8 +773,16 @@ export const useProfileStore = create<ProfileState>()(
         // reason other than a confirmed switch — would leave the wrong
         // owner recorded. Simplest correct rule: nobody is confirmed to
         // own this device's data the instant it is wiped.
+        // W27 (R-ONB-1 rule 3) — the one thing kept is `welcomeSkipped`, the
+        // device's own "the walkthrough has been shown here" fact. It is not
+        // the reader's data: it is never synced (the server has no column for
+        // it) and it says nothing about who used this browser. Wiping it sent
+        // a returning reader who had only signed out straight back into the
+        // walkthrough from `/` (FirstRunGate reads a default profile as "never
+        // set up"). `onboardedAt` still resets with the rest of the profile.
+        const walkthroughShown = get().profile.welcomeSkipped === true;
         set({
-          profile: defaultProfile,
+          profile: walkthroughShown ? { ...defaultProfile, welcomeSkipped: true } : defaultProfile,
           lastSynced: null,
           syncedAccountId: null,
         });
