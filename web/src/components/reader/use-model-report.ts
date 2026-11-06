@@ -260,13 +260,20 @@ export function buildReportKey(
  * decides its own `deep` with it, and the page enables the paragraph-gist pass on it
  * too, so the map's gists are written only when a deep report is: one switch, never
  * a second. Pure, so the rule is tested without rendering anything.
+ *
+ * R-BYOK-1 (1) (D-BYOK-1): a standalone uploaded PDF (`upload:<hash16>`) counts as an
+ * attached one. Its full text is the one the reader handed Peer and it has no abstract,
+ * so the abstract tier has nothing to send a model and a reader with a key could get no
+ * report from it unless they found the Deep report switch. A model is still required:
+ * without one (a signed-out or keyless reader) nothing is asked, as before.
  */
 export function deepReportRequested(
   profile: Pick<UserProfile, "deepReportEnabled">,
-  paper: Pick<Paper, "fullTextUploadId"> | undefined,
+  paper: (Pick<Paper, "fullTextUploadId"> & Partial<Pick<Paper, "id">>) | undefined,
   aiMode: AiMode,
 ): boolean {
-  return Boolean(profile.deepReportEnabled || paper?.fullTextUploadId) && aiMode !== "none";
+  const standaloneUpload = Boolean(paper?.id?.startsWith("upload:"));
+  return Boolean(profile.deepReportEnabled || paper?.fullTextUploadId || standaloneUpload) && aiMode !== "none";
 }
 
 /** A report based on an abstract cannot be displayed without that abstract. */

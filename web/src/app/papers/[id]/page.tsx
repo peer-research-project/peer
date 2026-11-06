@@ -817,7 +817,7 @@ function Reader({
   // for a day, on the reader's own key — and absent without one. P3-05 (§1h.8 (1)): it
   // reads the paper's body, so it is written only when a deep report is:
   // `deepReportRequested`, the report hook's own predicate (the Deep report switch, or an
-  // attached PDF, and a model), fed what the report hook is fed — the paper's text leaves
+  // attached or standalone uploaded PDF (R-BYOK-1), and a model), fed what the report hook is fed — the paper's text leaves
   // for a model on one switch. The reader's own key travels as the explain box sends it.
   const { gists: paragraphGists, partition: paragraphPartition } = useParagraphGuide({
     paper: ready ? paper : undefined,
