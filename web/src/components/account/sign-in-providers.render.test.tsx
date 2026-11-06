@@ -123,3 +123,28 @@ describe("rule 1 — a button only for a provider the project reports enabled", 
     expect(only({ github: false, google: true })).toEqual(["Sign in with Google"]);
   });
 });
+
+describe("rule 2 — while unknown, or if the settings cannot be read, today's buttons stay", () => {
+  it("loading -> both buttons on every surface (no jump, nothing waits)", () => {
+    vi.stubGlobal("fetch", vi.fn(() => new Promise(() => {})));
+    for (const [surface, html] of Object.entries(sharedSurfaces())) expect(buttonLabels(html), surface).toEqual(BOTH);
+    expect(buttonLabels(seedPool(null))).toEqual(["Sign in with Google", "Sign in with GitHub"]);
+  });
+
+  it("fetch fails -> both buttons on every surface", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("Failed to fetch");
+      }),
+    );
+    await loadSignInProviders();
+    for (const [surface, html] of Object.entries(sharedSurfaces())) expect(buttonLabels(html), surface).toEqual(BOTH);
+  });
+
+  it("a refused settings request (non-2xx) -> both buttons on every surface", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 401, json: async () => ({ external: {} }) })));
+    await loadSignInProviders();
+    for (const [surface, html] of Object.entries(sharedSurfaces())) expect(buttonLabels(html), surface).toEqual(BOTH);
+  });
+});

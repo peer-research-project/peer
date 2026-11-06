@@ -5,11 +5,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // The client snapshot, as a mounted component reads it after hydration: the
 // hook subscribes (which starts the one request) and reads the answer.
+// The server snapshot the hook hands React is kept, so the server render (and
+// the hydrating first client render) can be checked too.
+const store = vi.hoisted(() => ({ serverSnapshot: null as null | (() => unknown) }));
 vi.mock("react", async (importOriginal) => {
   const actual = await importOriginal<typeof import("react")>();
   return {
     ...actual,
-    useSyncExternalStore: (subscribe: (listener: () => void) => () => void, getSnapshot: () => unknown) => {
+    useSyncExternalStore: (
+      subscribe: (listener: () => void) => () => void,
+      getSnapshot: () => unknown,
+      getServerSnapshot: () => unknown,
+    ) => {
+      store.serverSnapshot = getServerSnapshot;
       subscribe(() => {});
       return getSnapshot();
     },
@@ -113,5 +121,54 @@ describe("the page-load answer — read once, shared by every set of buttons", (
     await loadSignInProviders(fetchImpl);
     expect(fetchImpl).toHaveBeenCalledWith(`${URL}/auth/v1/settings`, { headers: { apikey: "eyJ-anon" } });
     expect(currentSignInProviders()).toEqual(ALL_SIGN_IN_PROVIDERS);
+  });
+});
+
+describe("rule 2 — unknown or unreadable keeps today's two buttons", () => {
+  it("loading: before the answer arrives the buttons are both, and the server render reads unknown", () => {
+    vi.stubGlobal("fetch", vi.fn(() => new Promise(() => {})));
+    expect(useSignInProviders()).toBeNull();
+    expect(signInProvidersToShow(useSignInProviders())).toEqual({ github: true, google: true });
+    expect(signInProvidersToShow(null)).toEqual(ALL_SIGN_IN_PROVIDERS);
+  });
+
+  it("the server render and the hydrating first render read unknown, even once the answer is known", async () => {
+    vi.stubGlobal("fetch", stubFetch(settings({ github: true, google: false })));
+    await loadSignInProviders();
+    expect(useSignInProviders()).toEqual({ github: true, google: false });
+    expect(store.serverSnapshot?.()).toBeNull();
+    expect(signInProvidersToShow(store.serverSnapshot?.() as null)).toEqual({ github: true, google: true });
+  });
+
+  it("a request that throws (offline, CORS, DNS) is unknown, never a rejection", async () => {
+    const fetchImpl = vi.fn(async () => {
+      throw new TypeError("Failed to fetch");
+    }) as unknown as typeof fetch;
+    await expect(fetchSignInProviders(URL, KEY, fetchImpl)).resolves.toBeNull();
+    vi.stubGlobal("fetch", fetchImpl);
+    await expect(loadSignInProviders()).resolves.toBeUndefined();
+    expect(currentSignInProviders()).toBeNull();
+    expect(signInProvidersToShow(useSignInProviders())).toEqual({ github: true, google: true });
+  });
+
+  it("a non-2xx answer is unknown, even when its body looks like settings", async () => {
+    for (const status of [401, 404, 500]) {
+      const fetchImpl = stubFetch(settings({ github: false, google: false }), { ok: false, status });
+      expect(await fetchSignInProviders(URL, KEY, fetchImpl), String(status)).toBeNull();
+    }
+  });
+
+  it("a body that is not the settings JSON (or will not parse) is unknown", async () => {
+    for (const body of [null, "nope", {}, { external: "on" }, { msg: "Invalid API key" }]) {
+      expect(await fetchSignInProviders(URL, KEY, stubFetch(body)), JSON.stringify(body)).toBeNull();
+    }
+    const unparsable = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => {
+        throw new SyntaxError("Unexpected token <");
+      },
+    })) as unknown as typeof fetch;
+    expect(await fetchSignInProviders(URL, KEY, unparsable)).toBeNull();
   });
 });

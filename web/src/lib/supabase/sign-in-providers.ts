@@ -43,15 +43,24 @@ export function parseSignInProviders(body: unknown): SignInProviderFlags | null 
   return { github: flags.github !== false, google: flags.google !== false };
 }
 
-/** Asks the project which providers it has on. */
+/**
+ * Asks the project which providers it has on. Never throws: a failed request,
+ * a non-2xx answer or a body that is not the settings JSON is null, so the
+ * buttons stay as they are today (rule 2: never hide all sign-in by mistake).
+ */
 export async function fetchSignInProviders(
   supabaseUrl: string | undefined,
   publicKey: string | undefined,
   fetchImpl: typeof fetch = fetch,
 ): Promise<SignInProviderFlags | null> {
   if (!supabaseUrl || !publicKey) return null;
-  const response = await fetchImpl(authSettingsUrl(supabaseUrl), { headers: { apikey: publicKey } });
-  return parseSignInProviders(await response.json());
+  try {
+    const response = await fetchImpl(authSettingsUrl(supabaseUrl), { headers: { apikey: publicKey } });
+    if (!response.ok) return null;
+    return parseSignInProviders(await response.json());
+  } catch {
+    return null;
+  }
 }
 
 /** The buttons to draw for an answer; an unknown answer draws today's two. */
