@@ -9,6 +9,7 @@ import {
   placeEvidence,
   sectionCorpus,
   shapeEvidenceQuote,
+  statesNoveltyOrComparison,
   verifyReportEvidence,
 } from "./evidence";
 
@@ -1062,4 +1063,147 @@ it("withholds block prose when a nonempty source supports only some claims", () 
   expect(verified.whatItProposes.newHere).toBeUndefined();
   expect(verified.resultsAndSignificance.summary).toContain(ABSTRACT_SENTENCE);
   expect(verified.resultsAndSignificance.keyResults).toHaveLength(1);
+});
+
+// R-BYOK-2 (W25, 2026-11-05): a novelty line — the proposal's "new here" or a
+// result's `novelty` — is shown only with a verbatim sentence of the text that
+// states the novelty or the comparison with prior work. Invented text below.
+describe("R-BYOK-2: novelty lines carry a sentence that states the novelty", () => {
+  const CANOPY: ExtractedDocument = {
+    sections: [
+      { id: "s0", heading: "1 Introduction", canonical: "introduction", text: "Unlike prior work, we follow the same potted saplings for a whole growing season rather than a single afternoon. This fictional study measures leaf area on saplings of an invented species." },
+      { id: "s1", heading: "2 Methods", canonical: "methods", text: "Leaf area and canopy water retention duration were measured under controlled identical conditions for every sapling." },
+      { id: "s2", heading: "3 Results", canonical: "results", text: "Saplings with a larger leaf area kept water on the canopy for longer in every trial we ran." },
+    ],
+    figureCaptions: [],
+    source: "pdf",
+  };
+  const COMPARISON = "Unlike prior work, we follow the same potted saplings for a whole growing season rather than a single afternoon.";
+  const METHOD = "Leaf area and canopy water retention duration were measured under controlled identical conditions for every sapling.";
+  const RESULT = "Saplings with a larger leaf area kept water on the canopy for longer in every trial we ran.";
+  const verify = (input: PaperReport) => verifyReportEvidence(input, { abstract: "", doc: CANOPY });
+
+  it("statesNoveltyOrComparison: prior-work and novelty wording yes, method / data / result wording no", () => {
+    for (const yes of [
+      COMPARISON,
+      "To our knowledge, this is the first season-long record of canopy water retention.",
+      "We show for the first time that the index rises with depth.",
+      "The model outperforms existing methods on all three sets.",
+      "Our approach improves on previous methods by a wide margin.",
+      "It reaches state-of-the-art accuracy on the benchmark.",
+      "Compared with earlier studies, the drift is halved.",
+      "We propose a novel counterfactual-generation framework.",
+      "Retention had not been measured on whole canopies before.",
+      "本文首次在整株冠层上测量了持水时间。",
+    ]) {
+      expect(statesNoveltyOrComparison(yes), yes).toBe(true);
+    }
+    for (const no of [
+      METHOD,
+      RESULT,
+      "This course outline walks through gradient descent on a twenty-point synthetic data set.",
+      "A decision tree is grown to depth three to show its structure.",
+      "We used a standard protocol for every run in the current study.",
+    ]) {
+      expect(statesNoveltyOrComparison(no), no).toBe(false);
+    }
+  });
+
+  it("a result's novelty with no sentence is removed and counted; the result itself stays", () => {
+    const { report: out, dropped } = verify(report({
+      resultsAndSignificance: { summary: "", keyResults: [{ title: "Longer", detail: "Bigger leaves hold water longer.", evidence: RESULT, novelty: "It links leaf area directly to retention." }] },
+    }));
+    expect(out.resultsAndSignificance.keyResults).toHaveLength(1);
+    expect(out.resultsAndSignificance.keyResults[0]).not.toHaveProperty("novelty");
+    expect(out.resultsAndSignificance.keyResults[0].evidenceWhere).toBe("3 Results");
+    expect(dropped).toBe(1);
+    expect(out.provenance.droppedClaims).toBe(1);
+  });
+
+  it("a verbatim sentence that only describes the method does not ground a novelty (rule (a) alone is not enough)", () => {
+    const { report: out, dropped } = verify(report({
+      resultsAndSignificance: { summary: "", keyResults: [{ title: "Longer", detail: "Bigger leaves hold water longer.", evidence: RESULT, novelty: "It links leaf area measurements directly to extended canopy water retention duration under controlled identical conditions.", noveltyEvidence: METHOD }] },
+    }));
+    expect(out.resultsAndSignificance.keyResults[0]).not.toHaveProperty("novelty");
+    expect(out.resultsAndSignificance.keyResults[0]).not.toHaveProperty("noveltyEvidence");
+    expect(dropped).toBe(1);
+  });
+
+  it("a comparison sentence that is not in the text does not ground a novelty", () => {
+    const { report: out, dropped } = verify(report({
+      resultsAndSignificance: { summary: "", keyResults: [{ title: "Longer", detail: "Bigger leaves hold water longer.", evidence: RESULT, novelty: "First season-long record.", noveltyEvidence: "Unlike all previous studies, we tracked every sapling for three full years in the field." }] },
+    }));
+    expect(out.resultsAndSignificance.keyResults[0]).not.toHaveProperty("novelty");
+    expect(dropped).toBe(1);
+  });
+
+  it("a result's novelty on a verbatim comparison sentence is kept, its sentence placed", () => {
+    const { report: out, dropped } = verify(report({
+      resultsAndSignificance: { summary: "", keyResults: [{ title: "Longer", detail: "Bigger leaves hold water longer.", evidence: RESULT, novelty: "It follows saplings for a season, not an afternoon.", noveltyEvidence: COMPARISON }] },
+    }));
+    const kept = out.resultsAndSignificance.keyResults[0];
+    expect(kept.novelty).toBe("It follows saplings for a season, not an afternoon.");
+    expect(kept.noveltyEvidence).toBe(COMPARISON);
+    expect(kept.noveltyEvidenceWhere).toBe("1 Introduction");
+    expect(kept.evidenceWhere).toBe("3 Results");
+    expect(dropped).toBe(0);
+  });
+
+  it("a result dropped for its own evidence is counted once, not again for its novelty", () => {
+    const { report: out, dropped } = verify(report({
+      resultsAndSignificance: { summary: "", keyResults: [{ title: "Made up", detail: "Not in the text.", evidence: "A sentence that the paper never wrote anywhere at all, not even once.", novelty: "Invented." }] },
+    }));
+    expect(out.resultsAndSignificance.keyResults).toHaveLength(0);
+    expect(dropped).toBe(1);
+  });
+
+  it("a 'new here' line is shown only with a grounded comparison sentence; the rest are removed and counted", () => {
+    const { report: out, dropped } = verify(report({
+      whatItProposes: {
+        summary: "",
+        methods: [],
+        newHere: ["It follows the same saplings for a whole season.", "It links leaf area directly to retention duration."],
+        newHereClaims: [
+          { text: "It follows the same saplings for a whole season.", evidence: COMPARISON },
+          { text: "It links leaf area directly to retention duration.", evidence: METHOD },
+        ],
+      },
+    }));
+    expect(out.whatItProposes.newHere).toEqual(["It follows the same saplings for a whole season."]);
+    expect(out.whatItProposes.newHereClaims).toEqual([
+      { text: "It follows the same saplings for a whole season.", evidence: COMPARISON, evidenceWhere: "1 Introduction" },
+    ]);
+    expect(dropped).toBe(1);
+    expect(out.provenance.droppedClaims).toBe(1);
+  });
+
+  it("a 'new here' line with no sentence — even one that is itself the paper's sentence — is removed and counted", () => {
+    const { report: out, dropped } = verify(report({
+      whatItProposes: { summary: "", methods: [], newHere: [RESULT, "Invented novelty."] },
+    }));
+    expect(out.whatItProposes).not.toHaveProperty("newHere");
+    expect(out.whatItProposes).not.toHaveProperty("newHereClaims");
+    expect(dropped).toBe(2);
+  });
+
+  it("leaves every other claim exactly as the verifier kept it before", () => {
+    const base = report({
+      skim: [{ text: "Bigger leaves hold water longer.", evidence: RESULT }],
+      whatItProposes: { summary: "", methods: [{ text: "Measured under identical conditions.", evidence: METHOD }] },
+      resultsAndSignificance: { summary: "", keyResults: [{ title: "Longer", detail: "Bigger leaves hold water longer.", evidence: RESULT }] },
+      limitations: [{ text: "One species.", evidence: METHOD }],
+      nextStep: { text: "Repeat outdoors.", evidence: RESULT },
+    });
+    const withNovelty = structuredClone(base);
+    withNovelty.whatItProposes.newHere = ["Invented novelty."];
+    withNovelty.resultsAndSignificance.keyResults[0].novelty = "Invented result novelty.";
+    const plain = verify(base);
+    const guarded = verify(withNovelty);
+    expect(JSON.stringify(guarded.report.skim)).toBe(JSON.stringify(plain.report.skim));
+    expect(JSON.stringify(guarded.report.whatItProposes)).toBe(JSON.stringify(plain.report.whatItProposes));
+    expect(JSON.stringify(guarded.report.resultsAndSignificance)).toBe(JSON.stringify(plain.report.resultsAndSignificance));
+    expect(JSON.stringify(guarded.report.limitations)).toBe(JSON.stringify(plain.report.limitations));
+    expect(JSON.stringify(guarded.report.nextStep)).toBe(JSON.stringify(plain.report.nextStep));
+    expect(guarded.dropped).toBe(plain.dropped + 2);
+  });
 });

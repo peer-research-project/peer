@@ -16,7 +16,7 @@ import type { Paper, UserProfile } from "@/types";
 import { apiFetch } from "@/lib/api";
 import type { PaperReport } from "@/lib/papers/report";
 import { streamPaperReport } from "@/lib/papers/report-stream";
-import { reportOutcome } from "@/lib/reader/report-outcome";
+import { modelAsked, reportOutcome, requestAbstract } from "@/lib/reader/report-outcome";
 import { aiAvailability, type AiMode } from "@/lib/feed/ai-tier";
 import { useSyncGate } from "@/components/profile-sync";
 import { REPORT_STATUS } from "./copy";
@@ -25,9 +25,12 @@ import { REPORT_STATUS } from "./copy";
 // replaces .novelty) and deleted "why it fits you" — a v5 report still has
 // the old two-block/fit shape and would render it for up to DEEP_TTL_MS
 // after upgrade without this bump.
-const STORAGE_KEY = "peer-paper-report-v8";
+// v9: R-BYOK-2 — a novelty line now needs a quoted sentence that states it; a v8
+// report may still carry an ungrounded "what is new here" line and would replay it
+// for up to DEEP_TTL_MS without this bump.
+const STORAGE_KEY = "peer-paper-report-v9";
 /** The cache the old page kept, with its fabricated fallbacks inside. */
-const LEGACY_STORAGE_KEYS = ["peer-paper-report-cache-v3", "peer-paper-report-v4", "peer-paper-report-v5", "peer-paper-report-v6"];
+const LEGACY_STORAGE_KEYS = ["peer-paper-report-cache-v3", "peer-paper-report-v4", "peer-paper-report-v5", "peer-paper-report-v6", "peer-paper-report-v7", "peer-paper-report-v8"];
 const MAX_ENTRIES = 40;
 /**
  * P9-48 rule 2 (A's P9-W3 §4, §6 item 1): the most the cache may take of the
@@ -260,13 +263,20 @@ export function buildReportKey(
  * decides its own `deep` with it, and the page enables the paragraph-gist pass on it
  * too, so the map's gists are written only when a deep report is: one switch, never
  * a second. Pure, so the rule is tested without rendering anything.
+ *
+ * R-BYOK-1 (1) (D-BYOK-1): a standalone uploaded PDF (`upload:<hash16>`) counts as an
+ * attached one. Its full text is the one the reader handed Peer and it has no abstract,
+ * so the abstract tier has nothing to send a model and a reader with a key could get no
+ * report from it unless they found the Deep report switch. A model is still required:
+ * without one (a signed-out or keyless reader) nothing is asked, as before.
  */
 export function deepReportRequested(
   profile: Pick<UserProfile, "deepReportEnabled">,
-  paper: Pick<Paper, "fullTextUploadId"> | undefined,
+  paper: (Pick<Paper, "fullTextUploadId"> & Partial<Pick<Paper, "id">>) | undefined,
   aiMode: AiMode,
 ): boolean {
-  return Boolean(profile.deepReportEnabled || paper?.fullTextUploadId) && aiMode !== "none";
+  const standaloneUpload = Boolean(paper?.id?.startsWith("upload:"));
+  return Boolean(profile.deepReportEnabled || paper?.fullTextUploadId || standaloneUpload) && aiMode !== "none";
 }
 
 /** A report based on an abstract cannot be displayed without that abstract. */
@@ -522,6 +532,10 @@ export function useModelReport({
       ...(sentQuestions.length > 0 ? { questions: [...sentQuestions] } : {}),
     };
 
+    // R-BYOK-1 (2): the abstract this request carries. The abstract tier asks a model only
+    // about it, so with none the server's empty report is "nothing asked" (`modelAsked`).
+    const abstract = requestAbstract(current);
+
     const fail = () => {
       if (!active()) return;
       setProgress(null);
@@ -555,8 +569,9 @@ export function useModelReport({
           signal: controller.signal,
         });
         // No mode event on this path: the reader's own key says whether the
-        // server had a provider to ask.
-        settle(report, userProviderConfigured);
+        // server had a provider to ask. Nor any stage: a deep request is taken to
+        // have reached the full text (R-BYOK-1 (2) narrows only what is known).
+        settle(report, modelAsked(userProviderConfigured, { abstract, fullTextRead: deep }));
       } catch {
         fail();
       }
@@ -575,6 +590,9 @@ export function useModelReport({
     const load = async () => {
       let modeSeen = false;
       let asked = false;
+      // R-BYOK-1 (2): the deep tier asks a model only once it holds the full text, which the
+      // stream says with its `reading` stage; before it the route falls back to the abstract tier.
+      let fullTextRead = false;
       await Promise.resolve();
       if (!active()) return;
       // A reader's own key means a model is to be asked: the page waits on it from the request on,
@@ -604,6 +622,7 @@ export function useModelReport({
           if (!modeSeen) throw new Error("Report stream did not begin with a mode event.");
 
           if (event.type === "stage") {
+            if (event.stage === "reading") fullTextRead = true;
             const pct = Number.isFinite(event.pct) ? Math.max(0, Math.min(100, event.pct)) : null;
             const label = stageLabel(event.stage, event.label, sentQuestions.length > 0);
             // The bar never moves backwards within a request; a request that has not yet said how far
@@ -617,7 +636,7 @@ export function useModelReport({
           }
           if (event.type === "report") {
             settled = true;
-            settle(event.report, asked);
+            settle(event.report, modelAsked(asked, { abstract, fullTextRead }));
             continue;
           }
           throw new Error(event.message);

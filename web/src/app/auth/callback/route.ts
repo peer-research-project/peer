@@ -41,7 +41,13 @@ async function signInRedirect(request: NextRequest): Promise<NextResponse> {
         return NextResponse.redirect(`${origin}${next}`);
       }
       if (forwardedHost) {
-        return NextResponse.redirect(`https://${forwardedHost}${next}`);
+        // The scheme the browser actually used: a production build served over
+        // plain http (a local `next start`) forwards `http`, and an https-only
+        // redirect there lands on "This site can't be reached". Anything other
+        // than http/https keeps the old https default.
+        const forwardedProto = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
+        const scheme = forwardedProto === "http" || forwardedProto === "https" ? forwardedProto : "https";
+        return NextResponse.redirect(`${scheme}://${forwardedHost}${next}`);
       }
       return NextResponse.redirect(`${origin}${next}`);
     }

@@ -21,10 +21,27 @@ describe("deepReportRequested — the one switch the paper's text leaves on (P3-
   const publicPaper = { fullTextUploadId: undefined };
   const attached = { fullTextUploadId: "upload:0123456789abcdef" };
 
+  // RE-AIMED (R-BYOK-1 (1), D-BYOK-1, 2026-11-05): the comment on the second assertion said a
+  // standalone upload is "the abstract report" with the switch off. The manager ruled that a
+  // standalone upload is treated like an attached PDF (its own case below); the assertion itself
+  // is unchanged — with no paper resolved yet there is nothing to read, so nothing is deep.
   it("is false with the switch off and no attached PDF, whatever model the reader has", () => {
     expect(deepReportRequested(off, publicPaper, "byok")).toBe(false);
-    // A standalone upload carries no `fullTextUploadId`: with the switch off it is the abstract report.
+    expect(deepReportRequested(off, { id: "arxiv:2611.00001", fullTextUploadId: undefined }, "byok")).toBe(false);
+    // No paper resolved yet: nothing to read.
     expect(deepReportRequested(off, undefined, "byok")).toBe(false);
+  });
+
+  // R-BYOK-1 (1): a standalone uploaded PDF is the reader's own full text, with no abstract for
+  // the abstract tier to send — it is deep like an attached PDF, and only with a model.
+  it("is true for a standalone upload even with the switch off, and only with a model", () => {
+    const standalone = { id: "upload:0f1e2d3c4b5a6978", fullTextUploadId: undefined };
+    expect(deepReportRequested(off, standalone, "byok")).toBe(true);
+    expect(deepReportRequested(on, standalone, "byok")).toBe(true);
+    expect(deepReportRequested(off, standalone, "none")).toBe(false);
+    expect(deepReportRequested(on, standalone, "none")).toBe(false);
+    // Only the id's own prefix: a public id that merely contains the word is not an upload.
+    expect(deepReportRequested(off, { id: "openalex:upload:W1", fullTextUploadId: undefined }, "byok")).toBe(false);
   });
 
   // P4-00: the model is the reader's own key ("byok") — the "system" mode, Peer's own
@@ -195,8 +212,13 @@ describe("useModelReport — private PDF report cache (P0-02)", () => {
     expect(mount(supplement)).toContain("hit:A report read once.");
   });
 
+  // RE-AIMED (R-BYOK-1 (1), D-BYOK-1, 2026-11-05): this pinned the cached report at the
+  // abstract depth because "a standalone upload goes deep only with the profile switch on". The
+  // manager ruled a standalone upload goes deep like an attached PDF whenever a model is there,
+  // so the report this reader (own key, switch off) is cached under is the deep one. What the
+  // test guards is unchanged: a standalone upload's cached report is read back on the next open.
   it("reads a standalone upload's report back on the second mount", () => {
-    const depth = "abstract"; // a standalone upload goes deep only with the profile switch on
+    const depth = "deep"; // a standalone upload with a model goes deep, switch on or off (R-BYOK-1)
     rememberReport(buildReportKey(standalone, depth, "", profile.feedAiProvider), { ...report, depth });
 
     expect(mount(standalone)).toContain("hit:A report read once.");

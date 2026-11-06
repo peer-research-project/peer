@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { defaultProfile, type UserProfile } from "@/types";
-import { hasBeenSetUp, walkthroughAction } from "./first-visit";
+import {
+  hasBeenSetUp,
+  isReturningAccountSignIn,
+  remoteShowsSetUp,
+  RETURNING_ACCOUNT_DESTINATION,
+  walkthroughAction,
+} from "./first-visit";
+import { safeReturnPath } from "@/lib/navigation/return-path";
 
 // P7-16 (R12): a profile that has never been set up opens on the /welcome
 // walkthrough once. These are the rules, with no React in them: what counts as
@@ -99,5 +106,72 @@ describe("walkthroughAction — what the first-run gate does on a page", () => {
     expect(walkthroughAction("/", profile)).toBeNull();
     expect(walkthroughAction("/search", profile)).toBeNull();
     expect(walkthroughAction("/welcome", profile)).toBeNull();
+  });
+});
+
+// W27 (R-ONB-1, 2026-11-06): "An account that was already set up never has to
+// go through the walkthrough again after signing in." "Already set up" is the
+// account's synced row, as the sign-in pull fetched it: research topics, a
+// project or a challenge (the server keeps no onboarding record of its own).
+// Invented rows only.
+describe("remoteShowsSetUp — the account's synced row says it was set up (W27, R-ONB-1 rule 1)", () => {
+  it.each([
+    ["research topics", { researchTopics: ["battery materials"] }],
+    ["a project", { currentProject: "A study of solid electrolytes" }],
+    ["a challenge", { currentChallenges: "Separating interface effects from bulk effects" }],
+  ])("%s alone is enough", (_name, remote) => {
+    expect(remoteShowsSetUp(remote)).toBe(true);
+  });
+
+  it("no row (a brand-new account, or a failed pull) is not", () => {
+    expect(remoteShowsSetUp(null)).toBe(false);
+    expect(remoteShowsSetUp(undefined)).toBe(false);
+  });
+
+  it("an empty row, or blank values, is not", () => {
+    expect(remoteShowsSetUp({})).toBe(false);
+    expect(remoteShowsSetUp({ researchTopics: [], currentProject: "  ", currentChallenges: "" })).toBe(false);
+  });
+});
+
+describe("isReturningAccountSignIn — a set-up account arriving (W27, R-ONB-1 rule 1)", () => {
+  it("(a) after a sign-out (no owner recorded), a set-up account signing in is one", () => {
+    expect(isReturningAccountSignIn(null, "user-returning", { researchTopics: ["battery materials"] })).toBe(true);
+  });
+
+  it("(b) a brand-new account (no row yet, or an empty one) is not: the wizard carries on", () => {
+    expect(isReturningAccountSignIn(null, "user-new", null)).toBe(false);
+    expect(isReturningAccountSignIn(null, "user-new", { researchTopics: [] })).toBe(false);
+  });
+
+  it("leaves for /, a page safeReturnPath would never send the walkthrough back to", () => {
+    expect(RETURNING_ACCOUNT_DESTINATION).toBe("/");
+    expect(RETURNING_ACCOUNT_DESTINATION.startsWith("/welcome")).toBe(false);
+    // `/` is the callback's own fallback when no return path is allowed.
+    expect(safeReturnPath(RETURNING_ACCOUNT_DESTINATION)).toBeNull();
+  });
+});
+
+// R-ONB-1 rule 2: "Do not eject a brand-new reader who is mid-walkthrough and
+// has just added their first topic on /welcome: rule 1 fires only on the
+// sign-in transition." The transition is this device not yet having confirmed
+// this account (`syncedAccountId`, read before the sign-in records it).
+describe("isReturningAccountSignIn — only on the sign-in itself (W27, R-ONB-1 rule 2)", () => {
+  const rowWithFirstTopic = { researchTopics: ["battery materials"] };
+
+  it("(c) a brand-new reader already signed in on this device, whose first topic (added in the wizard) is now on the row, is not taken out", () => {
+    // Signed in on the Account step: no row yet, so nothing fires...
+    expect(isReturningAccountSignIn(null, "user-new", null)).toBe(false);
+    // ...then a topic is added on /welcome and pushed; a reload, or a second
+    // auth event, sees this device already owned by the same account.
+    expect(isReturningAccountSignIn("user-new", "user-new", rowWithFirstTopic)).toBe(false);
+  });
+
+  it("a set-up account is still recognised on a fresh device (no owner yet) and after a sign-out", () => {
+    expect(isReturningAccountSignIn(null, "user-returning", rowWithFirstTopic)).toBe(true);
+  });
+
+  it("an account switch on this device (another owner recorded) is a sign-in too", () => {
+    expect(isReturningAccountSignIn("user-previous", "user-returning", rowWithFirstTopic)).toBe(true);
   });
 });

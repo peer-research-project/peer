@@ -76,6 +76,32 @@ describe("GET /auth/callback — where a successful sign-in lands", () => {
     expect(response.headers.get("location")).toBe("https://peer.homes/welcome?step=ai");
   });
 
+  it("keeps the scheme the browser used when a production build is served over http", async () => {
+    // A local `next start` forwards host localhost:3000 with proto http; an
+    // https redirect there was "This site can't be reached" after sign-in.
+    const response = await GET(
+      callback(
+        "?code=abc",
+        withCookie(encodeURIComponent("/profile"), {
+          "x-forwarded-host": "localhost:3000",
+          "x-forwarded-proto": "http",
+        }),
+      ),
+    );
+    expect(response.headers.get("location")).toBe("http://localhost:3000/profile");
+  });
+
+  it("keeps https behind an https proxy and falls back to https on an unknown scheme", async () => {
+    const https = await GET(
+      callback("?code=abc", { "x-forwarded-host": "peer.homes", "x-forwarded-proto": "https" }),
+    );
+    expect(https.headers.get("location")).toBe("https://peer.homes/");
+    const odd = await GET(
+      callback("?code=abc", { "x-forwarded-host": "peer.homes", "x-forwarded-proto": "javascript" }),
+    );
+    expect(odd.headers.get("location")).toBe("https://peer.homes/");
+  });
+
   it("uses the request origin in development, as before", async () => {
     vi.stubEnv("NODE_ENV", "development");
     const response = await GET(
