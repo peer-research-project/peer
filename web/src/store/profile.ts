@@ -780,12 +780,17 @@ export const useProfileStore = create<ProfileState>()(
         // a returning reader who had only signed out straight back into the
         // walkthrough from `/` (FirstRunGate reads a default profile as "never
         // set up"). `onboardedAt` still resets with the rest of the profile.
+        // The reset itself is unchanged (the /privacy tests pin it); the flag
+        // is put back in a second, synchronous set — React renders once, after both.
         const walkthroughShown = get().profile.welcomeSkipped === true;
         set({
-          profile: walkthroughShown ? { ...defaultProfile, welcomeSkipped: true } : defaultProfile,
+          profile: defaultProfile,
           lastSynced: null,
           syncedAccountId: null,
         });
+        if (walkthroughShown) {
+          set((s) => ({ profile: { ...s.profile, welcomeSkipped: true } }));
+        }
       },
     }),
     // skipHydration: persisted state is rehydrated after mount via
