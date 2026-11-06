@@ -148,3 +148,38 @@ describe("rule 2 — while unknown, or if the settings cannot be read, today's b
     for (const [surface, html] of Object.entries(sharedSurfaces())) expect(buttonLabels(html), surface).toEqual(BOTH);
   });
 });
+
+describe("rule 3 — no provider enabled: the one sentence, no buttons", () => {
+  const SENTENCE = "Sign-in is not set up on this copy of Peer.";
+
+  it("none enabled -> the sentence and no sign-in button, on every surface", async () => {
+    stubSettings({ github: false, google: false, email: true });
+    await loadSignInProviders();
+    for (const [surface, html] of Object.entries(sharedSurfaces())) {
+      expect(buttonLabels(html), surface).toEqual([]);
+      // No button at all. (The Account section's description above them still
+      // names both providers: rule 3 adds no copy beyond this one sentence.)
+      expect(html, surface).not.toContain("<button");
+      expect(html.split(SENTENCE).length - 1, surface).toBe(1);
+    }
+    const pool = seedPool({ github: false, google: false });
+    expect(buttonLabels(pool)).toEqual([]);
+    expect(pool.split(SENTENCE).length - 1).toBe(1);
+  });
+
+  it("the sentence appears only then: never while loading, on failure, or with one provider on", async () => {
+    for (const providers of [null, { github: true, google: false }, { github: false, google: true }, { github: true, google: true }]) {
+      const html = renderToStaticMarkup(createElement(SignInButtonsView, { ...handlers, providers }));
+      expect(html, JSON.stringify(providers)).not.toContain(SENTENCE);
+      expect(seedPool(providers), JSON.stringify(providers)).not.toContain(SENTENCE);
+    }
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("Failed to fetch");
+      }),
+    );
+    await loadSignInProviders();
+    for (const [surface, html] of Object.entries(sharedSurfaces())) expect(html, surface).not.toContain(SENTENCE);
+  });
+});

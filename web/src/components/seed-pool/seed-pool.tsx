@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { signInWithGitHub, signInWithGoogle } from "@/components/account/use-auth-user";
 import { useSyncGate } from "@/components/profile-sync";
-import { signInProvidersToShow, useSignInProviders, type SignInProviderFlags } from "@/lib/supabase/sign-in-providers";
+import { SIGN_IN_NOT_SET_UP, noSignInProvider, signInProvidersToShow, useSignInProviders, type SignInProviderFlags } from "@/lib/supabase/sign-in-providers";
 import { forgetSeedPaper, getSeedPool, saveSeedPool, SeedPoolRequestError, uploadSeedPaper, type SeedPoolEditor } from "@/lib/seed-pool/client-api";
 import type { SeedPaper } from "@/lib/seed-pool/types";
 import { buttonVariants } from "@/components/ui/button";
@@ -58,6 +58,7 @@ function SeedPoolSignIn({ returnTo }: { returnTo: string }) { return <SeedPoolSi
 /** `SeedPoolSignIn` with the project's answer handed in, for static tests. */
 export function SeedPoolSignInView({ returnTo, providers }: { returnTo: string; providers: SignInProviderFlags | null }) {
   const shown = signInProvidersToShow(providers);
+  if (noSignInProvider(shown)) return <p className="leading-relaxed measure-ui">{SIGN_IN_NOT_SET_UP}</p>;
   return <div className="flex flex-wrap gap-3">{shown.google && <button type="button" className={SIGN_IN_ACTION} onClick={() => void signInWithGoogle(returnTo)}>Sign in with Google</button>}{shown.github && <button type="button" className={SIGN_IN_ACTION} onClick={() => void signInWithGitHub(returnTo)}>Sign in with GitHub</button>}</div>;
 }
 

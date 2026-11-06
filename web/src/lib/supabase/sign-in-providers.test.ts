@@ -172,3 +172,18 @@ describe("rule 2 — unknown or unreadable keeps today's two buttons", () => {
     expect(await fetchSignInProviders(URL, KEY, unparsable)).toBeNull();
   });
 });
+
+describe("rule 3 — the one sentence, only when no provider is on", () => {
+  it("is the ruled wording", async () => {
+    const { SIGN_IN_NOT_SET_UP } = await import("./sign-in-providers");
+    expect(SIGN_IN_NOT_SET_UP).toBe("Sign-in is not set up on this copy of Peer.");
+  });
+
+  it("none enabled is the only case that draws it", async () => {
+    const { noSignInProvider } = await import("./sign-in-providers");
+    expect(noSignInProvider(signInProvidersToShow(parseSignInProviders(settings({ github: false, google: false }))))).toBe(true);
+    expect(noSignInProvider(signInProvidersToShow(parseSignInProviders(settings({ github: true, google: false }))))).toBe(false);
+    expect(noSignInProvider(signInProvidersToShow(parseSignInProviders(settings({ github: false, google: true }))))).toBe(false);
+    expect(noSignInProvider(signInProvidersToShow(null))).toBe(false);
+  });
+});

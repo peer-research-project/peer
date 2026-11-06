@@ -43,6 +43,8 @@ import {
 import { requestProfileFlush, type AuthOutcome } from "@/components/profile-sync";
 import { useFeedSyncStatus } from "@/components/feed-sync";
 import {
+  SIGN_IN_NOT_SET_UP,
+  noSignInProvider,
   signInProvidersToShow,
   useSignInProviders,
   type SignInProviderFlags,
@@ -557,6 +559,7 @@ export interface SignInButtonsViewProps extends SignInButtonsProps {
 /** `SignInButtons` with the project's answer handed in, for static tests. */
 export function SignInButtonsView({ busy, onSignInGitHub, onSignInGoogle, providers }: SignInButtonsViewProps) {
   const shown = signInProvidersToShow(providers);
+  if (noSignInProvider(shown)) return <p className="text-meta text-text-muted">{SIGN_IN_NOT_SET_UP}</p>;
   return (
     <>
       {shown.github && (

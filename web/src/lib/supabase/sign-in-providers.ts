@@ -63,6 +63,18 @@ export async function fetchSignInProviders(
   }
 }
 
+/**
+ * Rule 3: the one sentence drawn in place of the buttons when the project
+ * reports every provider off — and only then. (A provider that errors after a
+ * click still lands on the existing /auth/error page.)
+ */
+export const SIGN_IN_NOT_SET_UP = "Sign-in is not set up on this copy of Peer.";
+
+/** True when the project has no sign-in provider on: draw the sentence. */
+export function noSignInProvider(shown: SignInProviderFlags): boolean {
+  return !shown.github && !shown.google;
+}
+
 /** The buttons to draw for an answer; an unknown answer draws today's two. */
 export function signInProvidersToShow(answer: SignInProviderFlags | null): SignInProviderFlags {
   return answer ?? ALL_SIGN_IN_PROVIDERS;
