@@ -151,3 +151,27 @@ describe("isReturningAccountSignIn — a set-up account arriving (W27, R-ONB-1 r
     expect(safeReturnPath(RETURNING_ACCOUNT_DESTINATION)).toBeNull();
   });
 });
+
+// R-ONB-1 rule 2: "Do not eject a brand-new reader who is mid-walkthrough and
+// has just added their first topic on /welcome: rule 1 fires only on the
+// sign-in transition." The transition is this device not yet having confirmed
+// this account (`syncedAccountId`, read before the sign-in records it).
+describe("isReturningAccountSignIn — only on the sign-in itself (W27, R-ONB-1 rule 2)", () => {
+  const rowWithFirstTopic = { researchTopics: ["battery materials"] };
+
+  it("(c) a brand-new reader already signed in on this device, whose first topic (added in the wizard) is now on the row, is not taken out", () => {
+    // Signed in on the Account step: no row yet, so nothing fires...
+    expect(isReturningAccountSignIn(null, "user-new", null)).toBe(false);
+    // ...then a topic is added on /welcome and pushed; a reload, or a second
+    // auth event, sees this device already owned by the same account.
+    expect(isReturningAccountSignIn("user-new", "user-new", rowWithFirstTopic)).toBe(false);
+  });
+
+  it("a set-up account is still recognised on a fresh device (no owner yet) and after a sign-out", () => {
+    expect(isReturningAccountSignIn(null, "user-returning", rowWithFirstTopic)).toBe(true);
+  });
+
+  it("an account switch on this device (another owner recorded) is a sign-in too", () => {
+    expect(isReturningAccountSignIn("user-previous", "user-returning", rowWithFirstTopic)).toBe(true);
+  });
+});

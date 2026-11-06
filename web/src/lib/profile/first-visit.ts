@@ -98,12 +98,22 @@ export function remoteShowsSetUp(remote: RemoteSetUpProfile | null | undefined):
  * Whether this sign-in is a set-up account arriving, so a reader on /welcome
  * leaves the walkthrough. `remote` is the account's row as the sign-in pull
  * fetched it, before this session's merge or push.
+ *
+ * Only on the sign-in itself (R-ONB-1 rule 2): `previousOwner` is the account
+ * this device had confirmed before this sign-in (`syncedAccountId`). It is
+ * `null` after a sign-out (`logOut()` clears it) and on a fresh device, and
+ * another id on an account switch — each a real arrival. When it is already
+ * this user, the reader was signed in all along (a reload, a second auth
+ * event): a row that has topics now may hold the very topic a brand-new reader
+ * added on /welcome a minute ago, and that reader is never taken out of the
+ * walkthrough they are in the middle of.
  */
 export function isReturningAccountSignIn(
-  _previousOwner: string | null,
-  _userId: string,
+  previousOwner: string | null,
+  userId: string,
   remote: RemoteSetUpProfile | null,
 ): boolean {
+  if (previousOwner === userId) return false;
   return remoteShowsSetUp(remote);
 }
 
