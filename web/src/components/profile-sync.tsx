@@ -24,6 +24,7 @@ import { supabase } from "@/lib/supabase/client";
 import { useProfileStore } from "@/store/profile";
 import { defaultProfile, type UserProfile } from "@/types";
 import { profileFeedIntentCard } from "@/lib/feed/intent";
+import { isReturningAccountSignIn } from "@/lib/profile/first-visit";
 import {
   mergeProfileAtSignIn,
   dirtySingleValueFields,
@@ -64,16 +65,32 @@ import {
 // `"signed-out"`, not back to `"unknown"`.
 export type AuthOutcome = "unknown" | "signed-in" | "signed-out" | "unconfigured";
 
+//
+// W27 (R-ONB-1, 2026-11-06) — `returningAccount` is true from the moment the
+// sign-in pull shows that the account which just signed in on this device had
+// already been set up (`isReturningAccountSignIn`, lib/profile/first-visit.ts),
+// until FirstRunGate has acted on it: on /welcome it stamps onboardedAt and
+// leaves the walkthrough for `/`, and the wizard holds its blank layout while
+// this is up so no half-finished step paints. It is set before `settled`
+// flips, and it is not gated on `settled`, so a pull slower than the settle
+// timeout still lands it.
 export const useSyncGate = create<{
   settled: boolean;
   authUserId: string | null;
   authOutcome: AuthOutcome;
+  returningAccount: boolean;
 }>(() => ({
   settled: false,
   authUserId: null,
   authOutcome: "unknown",
+  returningAccount: false,
 }));
 const markSyncSettled = () => useSyncGate.setState({ settled: true });
+
+/** FirstRunGate's "done": the returning-account signal has been acted on. */
+export function clearReturningAccount(): void {
+  useSyncGate.setState({ returningAccount: false });
+}
 
 const DEBOUNCE_MS = 700;
 
@@ -869,6 +886,7 @@ export function ProfileSync() {
         // P4-S5b-FIX3 — a CONFIRMED sign-out (never a rejected/unresolved
         // auth check — see the `.catch()` below, which deliberately leaves
         // this untouched). Clears any previously-published id.
+        clearReturningAccount();
         useSyncGate.setState({ authUserId: null, authOutcome: "signed-out" });
         // ACCOUNT-SWITCH (§1bt.8 AMENDMENT (b)) — checked exactly here:
         // the one moment `authOutcome` becomes the CONFIRMED "signed-out"
@@ -902,6 +920,12 @@ export function ProfileSync() {
       // or fail outright — see markSyncSettled in the `finally` below: a
       // FAILED pull still settles, and the owner id above is already set.
       useSyncGate.setState({ authUserId: userId, authOutcome: "signed-in" });
+
+      // W27 (R-ONB-1 rule 2) — who this device had confirmed before THIS
+      // sign-in, read before the switch check and the owner publish below
+      // overwrite it. `null` after a sign-out (`logOut()` clears it) or on a
+      // fresh device; this user's own id on a plain reload.
+      const previousOwner = useProfileStore.getState().syncedAccountId;
 
       // ACCOUNT-SWITCH (§1bt point 1) — before today's existing
       // pull/merge/push logic runs at all, check whose data this device is
@@ -963,6 +987,12 @@ export function ProfileSync() {
         const { patch, pushPayload, merged } = planReconcile(local, remote, lastSynced);
         if (Object.keys(patch).length > 0) {
           useProfileStore.setState((s) => ({ profile: { ...s.profile, ...patch } }));
+        }
+        // W27 (R-ONB-1 rule 1) — judged on `remote` as fetched, before this
+        // session's push, and after the merged profile is in the store (so
+        // FirstRunGate's completeOnboarding promotes the account's topics).
+        if (isReturningAccountSignIn(previousOwner, userId, remote)) {
+          useSyncGate.setState({ returningAccount: true });
         }
 
         // Reconcile the account to whatever this merge just decided. A push

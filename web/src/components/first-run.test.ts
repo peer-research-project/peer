@@ -8,7 +8,7 @@
 // walkthrough, P7-16c) is proven in `lib/profile/first-visit.test.ts`; this
 // file proves the gate acts on it: after hydration and sync, with
 // `router.replace`, once.
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("react", async (importOriginal) => {
   const actual = await importOriginal<typeof import("react")>();
@@ -31,6 +31,9 @@ const world = vi.hoisted(() => ({
   completeOnboarding: vi.fn(),
   /** Stands in for the store action: it records the flag where a second open can read it. */
   skipWelcome: vi.fn(),
+  /** W27: ProfileSync's "a set-up account just signed in" signal, and its clear. */
+  returningAccount: false,
+  clearReturningAccount: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -57,7 +60,9 @@ vi.mock("@/store/profile", () => {
 });
 
 vi.mock("@/components/profile-sync", () => ({
-  useSyncGate: (select: (s: { settled: boolean }) => unknown) => select({ settled: world.syncSettled }),
+  useSyncGate: (select: (s: { settled: boolean; returningAccount: boolean }) => unknown) =>
+    select({ settled: world.syncSettled, returningAccount: world.returningAccount }),
+  clearReturningAccount: world.clearReturningAccount,
 }));
 
 import { hookRuntime } from "@/test-support/hook-runtime";
@@ -174,5 +179,83 @@ describe("FirstRunGate — a never-set-up profile opens on the walkthrough once 
     world.profile = { ...defaultProfile, researchTopics: ["battery materials"] };
     await open("/welcome");
     expect(world.completeOnboarding).not.toHaveBeenCalled();
+  });
+});
+
+// W27 (R-ONB-1, 2026-11-06). The owner: "when an existing account logged in,
+// the user should not be asked to walkthrough the beginning walkthrough
+// process again." Seen by the manager: after Sign out -> GitHub sign-in the
+// browser landed on /welcome?step=account, inside the walkthrough. ProfileSync
+// raises `returningAccount` at the sign-in pull when the account was already
+// set up (the decision is proven in lib/profile/first-visit.test.ts); this
+// proves the gate acts on it: on /welcome it stamps onboardedAt and leaves for
+// `/` with replace, once; elsewhere it moves nobody; without it, nothing moves.
+describe("FirstRunGate — a set-up account that signs in leaves the walkthrough (W27, R-ONB-1)", () => {
+  beforeEach(() => {
+    world.pathname = "/welcome";
+    world.hydrated = true;
+    world.syncSettled = true;
+    // The account's synced topics have landed; the device flags were wiped.
+    world.profile = { ...defaultProfile, researchTopics: ["battery materials"] };
+    world.returningAccount = true;
+    world.replace.mockReset();
+    world.completeOnboarding.mockReset();
+    world.completeOnboarding.mockImplementation(() => {
+      world.profile = { ...world.profile, onboardedAt: "2026-11-06T09:00:00.000Z", welcomeSkipped: true };
+    });
+    world.skipWelcome.mockReset();
+    world.clearReturningAccount.mockReset();
+    world.clearReturningAccount.mockImplementation(() => {
+      world.returningAccount = false;
+    });
+  });
+
+  afterEach(() => {
+    world.returningAccount = false;
+    world.completeOnboarding.mockReset();
+  });
+
+  it("(a) on /welcome?step=account: stamps onboardedAt and replaces to /, once", async () => {
+    await open("/welcome");
+    expect(world.completeOnboarding).toHaveBeenCalledTimes(1);
+    expect(world.profile.onboardedAt).toEqual(expect.any(String));
+    expect(world.replace).toHaveBeenCalledTimes(1);
+    expect(world.replace).toHaveBeenCalledWith("/");
+    // Landing on `/` spends the signal, and nothing sends the reader back.
+    await open("/");
+    expect(world.clearReturningAccount).toHaveBeenCalledTimes(1);
+    expect(world.returningAccount).toBe(false);
+    expect(world.replace).toHaveBeenCalledTimes(1);
+    expect(world.completeOnboarding).toHaveBeenCalledTimes(1);
+  });
+
+  it("a later visit to /welcome of the reader's own, after the signal is spent, opens normally", async () => {
+    await open("/welcome");
+    await open("/");
+    world.replace.mockReset();
+    await open("/welcome");
+    expect(world.replace).not.toHaveBeenCalled();
+  });
+
+  it("signed in from another page (a paper, the Profile): nobody is moved, the stamp is written, the signal spent", async () => {
+    world.profile = { ...defaultProfile, currentProject: "A study of solid electrolytes" };
+    await open("/papers/abc");
+    expect(world.replace).not.toHaveBeenCalled();
+    expect(world.completeOnboarding).toHaveBeenCalledTimes(1);
+    expect(world.clearReturningAccount).toHaveBeenCalledTimes(1);
+  });
+
+  it("acts on the pull itself, not on the settle timeout: it leaves /welcome even before `settled`", async () => {
+    world.syncSettled = false;
+    await open("/welcome");
+    expect(world.replace).toHaveBeenCalledWith("/");
+  });
+
+  it("(b, c) without the signal — a brand-new account, or a first topic just added in the wizard — /welcome is left alone", async () => {
+    world.returningAccount = false;
+    await open("/welcome");
+    expect(world.replace).not.toHaveBeenCalled();
+    expect(world.completeOnboarding).not.toHaveBeenCalled();
+    expect(world.clearReturningAccount).not.toHaveBeenCalled();
   });
 });

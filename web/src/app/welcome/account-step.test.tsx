@@ -317,3 +317,28 @@ describe("the Account step's Next button: one line on a phone, and its name is i
     expect(nameAt(html, "sm")).toBe("Continue");
   });
 });
+
+// W27 (R-ONB-1 rule 1, 2026-11-06): the Account step's sign-in comes back here
+// (`ACCOUNT_STEP_RETURN_TO`). When the account that signed in was already set
+// up, FirstRunGate takes the reader out of the walkthrough (first-run.test.ts);
+// meanwhile the wizard must not paint a half-finished step for that account.
+// The page cannot be rendered headlessly with its effects, so the hold is
+// pinned in the source: while the signal is up there is no step, which is the
+// branch that paints the blank layout.
+describe("the wizard paints no step while a set-up account is leaving it (W27, R-ONB-1)", () => {
+  const page = read("src/app/welcome/page.tsx");
+
+  it("reads ProfileSync's returning-account signal", () => {
+    expect(page).toContain("const leavingForReturningAccount = useSyncGate((s) => s.returningAccount);");
+  });
+
+  it("no step is chosen while it is up, so the blank layout shows instead of a step", () => {
+    expect(page).toContain("const chosenStep = leavingForReturningAccount ? null : manualStep ?? autoStart;");
+    expect(page).toContain("const step = chosenStep === null ? null : Math.min(chosenStep, total - 1);");
+    expect(page).toMatch(/step === null \|\| key === null \?/);
+  });
+
+  it("the Account step still comes back to /welcome, where the gate can act on it", () => {
+    expect(ACCOUNT_STEP_RETURN_TO).toBe("/welcome?step=account");
+  });
+});

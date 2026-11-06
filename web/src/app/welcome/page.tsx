@@ -142,8 +142,12 @@ export default function WelcomePage() {
         firstIncompleteStep(profile, readPersonaDone(), auth),
     );
   }
+  // W27 (R-ONB-1 rule 1): an account that was already set up has just signed
+  // in, and FirstRunGate is taking the reader out of the walkthrough. No step
+  // paints meanwhile — never a half-finished wizard for such an account.
+  const leavingForReturningAccount = useSyncGate((s) => s.returningAccount);
   const total = steps.length;
-  const chosenStep = manualStep ?? autoStart;
+  const chosenStep = leavingForReturningAccount ? null : manualStep ?? autoStart;
   const step = chosenStep === null ? null : Math.min(chosenStep, total - 1);
   const setStep = setManualStep;
 

@@ -1584,3 +1584,50 @@ describe("requestProfileFlush / ProfileSync's flush registration (§1bt point 3)
     expect(body).toMatch(/runSyncSerialized\(\s*listPullDeps\(lastPushedRef\)/);
   });
 });
+
+// W27 (R-ONB-1, 2026-11-06) — source-text check, this file's technique for the
+// onSession closure the harness cannot mount. The decision itself
+// (`isReturningAccountSignIn`) is proven in lib/profile/first-visit.test.ts and
+// the gate's action in first-run.test.ts; this pins the wiring between them:
+// the previous owner is read before this sign-in overwrites it, the signal is
+// judged on the row as fetched (before this session's push) once the merged
+// profile is in the store, it is raised before the gate settles, and a
+// confirmed sign-out lowers it.
+describe("ProfileSync raises the returning-account signal at the sign-in pull (W27, R-ONB-1) — source-text check", () => {
+  const source = readFileSync(join(process.cwd(), "src/components/profile-sync.tsx"), "utf8");
+  const signedIn = source.indexOf('useSyncGate.setState({ authUserId: userId, authOutcome: "signed-in" });');
+  const previousOwner = source.indexOf("const previousOwner = useProfileStore.getState().syncedAccountId;");
+  const switchCheck = source.indexOf("if (isAccountSwitch(useProfileStore.getState().syncedAccountId, userId)) {");
+  const ownerPublish = source.indexOf("useProfileStore.getState().setSyncedAccountId(userId);", signedIn);
+  const fetchAt = source.indexOf("const remote = await fetchRemote();", signedIn);
+  const patchApplied = source.indexOf("useProfileStore.setState((s) => ({ profile: { ...s.profile, ...patch } }));", fetchAt);
+  const raise = source.indexOf("if (isReturningAccountSignIn(previousOwner, userId, remote)) {");
+  const raised = source.indexOf("useSyncGate.setState({ returningAccount: true });", raise);
+  const push = source.indexOf("await pushRemote(pushPayload)", fetchAt);
+  const settle = source.indexOf("markSyncSettled();", fetchAt);
+
+  it("reads the previous owner after the signed-in publish and before the switch check and the owner publish", () => {
+    expect(signedIn).toBeGreaterThan(-1);
+    expect(previousOwner).toBeGreaterThan(signedIn);
+    expect(switchCheck).toBeGreaterThan(previousOwner);
+    expect(ownerPublish).toBeGreaterThan(switchCheck);
+  });
+
+  it("judges the fetched row after the merged profile is installed, before the push and before the gate settles", () => {
+    expect(patchApplied).toBeGreaterThan(fetchAt);
+    expect(raise).toBeGreaterThan(patchApplied);
+    expect(raised).toBeGreaterThan(raise);
+    expect(push).toBeGreaterThan(raised);
+    expect(settle).toBeGreaterThan(raised);
+  });
+
+  it("a confirmed sign-out lowers it, in the signed-out branch", () => {
+    const branch = source.slice(source.indexOf("if (!signedIn) {"), signedIn);
+    expect(branch).toMatch(/clearReturningAccount\(\);/);
+  });
+
+  it("starts lowered", async () => {
+    const { useSyncGate } = await import("./profile-sync");
+    expect(useSyncGate.getInitialState().returningAccount).toBe(false);
+  });
+});
