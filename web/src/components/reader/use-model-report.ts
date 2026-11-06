@@ -25,9 +25,12 @@ import { REPORT_STATUS } from "./copy";
 // replaces .novelty) and deleted "why it fits you" — a v5 report still has
 // the old two-block/fit shape and would render it for up to DEEP_TTL_MS
 // after upgrade without this bump.
-const STORAGE_KEY = "peer-paper-report-v8";
+// v9: R-BYOK-2 — a novelty line now needs a quoted sentence that states it; a v8
+// report may still carry an ungrounded "what is new here" line and would replay it
+// for up to DEEP_TTL_MS without this bump.
+const STORAGE_KEY = "peer-paper-report-v9";
 /** The cache the old page kept, with its fabricated fallbacks inside. */
-const LEGACY_STORAGE_KEYS = ["peer-paper-report-cache-v3", "peer-paper-report-v4", "peer-paper-report-v5", "peer-paper-report-v6"];
+const LEGACY_STORAGE_KEYS = ["peer-paper-report-cache-v3", "peer-paper-report-v4", "peer-paper-report-v5", "peer-paper-report-v6", "peer-paper-report-v7", "peer-paper-report-v8"];
 const MAX_ENTRIES = 40;
 /**
  * P9-48 rule 2 (A's P9-W3 §4, §6 item 1): the most the cache may take of the
