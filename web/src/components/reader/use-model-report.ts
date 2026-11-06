@@ -16,7 +16,7 @@ import type { Paper, UserProfile } from "@/types";
 import { apiFetch } from "@/lib/api";
 import type { PaperReport } from "@/lib/papers/report";
 import { streamPaperReport } from "@/lib/papers/report-stream";
-import { reportOutcome } from "@/lib/reader/report-outcome";
+import { modelAsked, reportOutcome, requestAbstract } from "@/lib/reader/report-outcome";
 import { aiAvailability, type AiMode } from "@/lib/feed/ai-tier";
 import { useSyncGate } from "@/components/profile-sync";
 import { REPORT_STATUS } from "./copy";
@@ -529,6 +529,10 @@ export function useModelReport({
       ...(sentQuestions.length > 0 ? { questions: [...sentQuestions] } : {}),
     };
 
+    // R-BYOK-1 (2): the abstract this request carries. The abstract tier asks a model only
+    // about it, so with none the server's empty report is "nothing asked" (`modelAsked`).
+    const abstract = requestAbstract(current);
+
     const fail = () => {
       if (!active()) return;
       setProgress(null);
@@ -562,8 +566,9 @@ export function useModelReport({
           signal: controller.signal,
         });
         // No mode event on this path: the reader's own key says whether the
-        // server had a provider to ask.
-        settle(report, userProviderConfigured);
+        // server had a provider to ask. Nor any stage: a deep request is taken to
+        // have reached the full text (R-BYOK-1 (2) narrows only what is known).
+        settle(report, modelAsked(userProviderConfigured, { abstract, fullTextRead: deep }));
       } catch {
         fail();
       }
@@ -582,6 +587,9 @@ export function useModelReport({
     const load = async () => {
       let modeSeen = false;
       let asked = false;
+      // R-BYOK-1 (2): the deep tier asks a model only once it holds the full text, which the
+      // stream says with its `reading` stage; before it the route falls back to the abstract tier.
+      let fullTextRead = false;
       await Promise.resolve();
       if (!active()) return;
       // A reader's own key means a model is to be asked: the page waits on it from the request on,
@@ -611,6 +619,7 @@ export function useModelReport({
           if (!modeSeen) throw new Error("Report stream did not begin with a mode event.");
 
           if (event.type === "stage") {
+            if (event.stage === "reading") fullTextRead = true;
             const pct = Number.isFinite(event.pct) ? Math.max(0, Math.min(100, event.pct)) : null;
             const label = stageLabel(event.stage, event.label, sentQuestions.length > 0);
             // The bar never moves backwards within a request; a request that has not yet said how far
@@ -624,7 +633,7 @@ export function useModelReport({
           }
           if (event.type === "report") {
             settled = true;
-            settle(event.report, asked);
+            settle(event.report, modelAsked(asked, { abstract, fullTextRead }));
             continue;
           }
           throw new Error(event.message);

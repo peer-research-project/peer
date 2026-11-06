@@ -48,6 +48,7 @@ vi.mock("@/components/profile-sync", () => ({
 
 import { hookRuntime } from "@/test-support/hook-runtime";
 import { emptyReport } from "@/lib/papers/report";
+import { buildReading, describeAvailability } from "@/lib/papers/reading";
 import { defaultProfile, type Paper, type UserProfile } from "@/types";
 import { useModelReport, type ModelReportState } from "./use-model-report";
 
@@ -170,5 +171,71 @@ describe("R-BYOK-1 (1): a standalone upload with a model gets the deep report", 
       expect(state.report).toBeNull();
       expect(state.failed).toBe(false);
     }
+  });
+});
+
+describe("R-BYOK-1 (2): 'could not finish' only when a model was asked and failed", () => {
+  it("(d) the server returns the empty report for an abstract-tier request with no abstract: no model was asked, so no failure", async () => {
+    const state = await open(noAbstract, keyed);
+    expect(net.streamCalls).toHaveLength(1);
+    expect(net.streamCalls[0].deepReport).toBe(false);
+    expect(state.report).toBeNull();
+    expect(state.failed).toBe(false);
+    // What the page then says (it hands `failed` to the Decision block as `modelFailed`): the
+    // reading's own honest line, and no "could not finish".
+    const sentences = describeAvailability({
+      reading: buildReading(noAbstract, null, new Date("2026-11-05T12:00:00.000Z")),
+      report: null,
+      providerConfigured: true,
+      profileHasProject: false,
+      modelFailed: state.failed,
+    });
+    expect(sentences).toEqual(["Peer could not retrieve an abstract — only the record. Open it at the source to judge it."]);
+    expect(sentences.join(" ")).not.toContain("could not finish");
+  });
+
+  it("(d, JSON path) the same empty report from the JSON fallback, with no abstract sent: no failure", async () => {
+    net.script = () => [mode("tier1"), { type: "error", message: "Peer could not finish the report stream." }];
+    const state = await open(noAbstract, keyed);
+    expect(net.jsonCalls).toHaveLength(1);
+    // The stream broke and the request was asked again as JSON; that answer is what settles it, and
+    // it is the honest empty report of an abstract-tier request with no abstract: nothing was asked.
+    expect(state.report).toBeNull();
+    expect(state.failed).toBe(false);
+  });
+
+  it("(e) a real model failure — the abstract tier asked about an abstract and got the empty report — still fails", async () => {
+    net.script = () => [mode("tier1"), stage("writing", 20), reportOf(emptyReport("fallback"))];
+    const state = await open(withAbstract, keyed);
+    expect(state.report).toBeNull();
+    expect(state.failed).toBe(true);
+    const sentences = describeAvailability({
+      reading: buildReading(withAbstract, null, new Date("2026-11-05T12:00:00.000Z")),
+      report: null,
+      providerConfigured: true,
+      profileHasProject: false,
+      modelFailed: state.failed,
+    });
+    expect(sentences).toContain("Your model could not finish; what is below is the paper's own text.");
+  });
+
+  it("(e) a deep read that reached the full text and came back empty still fails (standalone upload)", async () => {
+    net.script = () => [mode("tier2"), stage("source", 10), stage("reading", 35), stage("writing", 75), reportOf(emptyReport("fallback"))];
+    const state = await open(standalone, keyed);
+    expect(net.streamCalls[0].deepReport).toBe(true);
+    expect(state.failed).toBe(true);
+  });
+
+  it("(e) a deep request with no full text found and no abstract: the fallback asked no model, so no failure", async () => {
+    net.script = () => [mode("tier2"), stage("source", 10), stage("writing", 75), reportOf(emptyReport("fallback"))];
+    const state = await open(noAbstract, { ...keyed, deepReportEnabled: true });
+    expect(net.streamCalls[0].deepReport).toBe(true);
+    expect(state.failed).toBe(false);
+  });
+
+  it("(e) a stream error is still a failure, abstract or none", async () => {
+    net.script = () => [mode("tier2"), stage("reading", 35), { type: "error", message: "Peer could not finish the report stream." }];
+    const state = await open(standalone, keyed);
+    expect(state.failed).toBe(true);
   });
 });
