@@ -23,9 +23,17 @@ vi.mock("react", async (importOriginal) => {
   };
 });
 
+// The seed pool reads the account from the sync gate; signed out here.
+vi.mock("@/components/profile-sync", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  useSyncGate: (select: (state: { authOutcome: string; authUserId: string | null }) => unknown) =>
+    select({ authOutcome: "signed-out", authUserId: null }),
+}));
+
+import { createHash } from "node:crypto";
 import { AccountSectionView, SignInButtonsView, type AccountSectionViewProps } from "./account-section";
 import { AccountStepView, SignInToUseKeyView } from "@/app/welcome/account-step";
-import { SeedPoolSignInView } from "@/components/seed-pool/seed-pool";
+import { SeedPool, SeedPoolSignInView } from "@/components/seed-pool/seed-pool";
 import {
   loadSignInProviders,
   resetSignInProvidersForTests,
@@ -181,5 +189,69 @@ describe("rule 3 — no provider enabled: the one sentence, no buttons", () => {
     );
     await loadSignInProviders();
     for (const [surface, html] of Object.entries(sharedSurfaces())) expect(html, surface).not.toContain(SENTENCE);
+  });
+});
+
+describe("rule 4 — both enabled (production): the same buttons, order, labels and markup as before", () => {
+  // sha256 of each surface's signed-out markup rendered from 0ec62242, the
+  // commit before R-AUTH-PROV (captured 2026-11-06 by rendering these same
+  // elements against that commit's account-section.tsx and seed-pool.tsx).
+  const BEFORE: Record<string, string> = {
+    account: "80a89c49313dd4f4f68f771aae799b4caed59ca81eff62c0754071a023ed11e9",
+    accountBusy: "f88932885f77dfefe20a4205c27b6d4e8236def6bc3c7cda1e1d98afd5911512",
+    welcomeAccount: "99c8f3e6dfc6e430f6bee544579ad8576365e2ce810b0dd1032bf90059dbb1f2",
+    welcomeAi: "bcda9176b7d3c238aebc247e712f4056151dcf8d2c3e3942047924726c8f9d9a",
+    seedProfile: "02a438a34cd448a3379d430eb2908340a53e5e75447345c05c29303bcc01eae4",
+    seedOnboarding: "02a438a34cd448a3379d430eb2908340a53e5e75447345c05c29303bcc01eae4",
+  };
+  const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
+
+  function surfacesNow(): Record<string, string> {
+    const signedOut = (busy: boolean) =>
+      renderToStaticMarkup(
+        createElement(AccountSectionView, {
+          authKind: "signed-out",
+          user: null,
+          busy,
+          confirmingSignOut: false,
+          onSignInGitHub: () => {},
+          onSignInGoogle: () => {},
+          onSignOutSubmit: () => {},
+          onStaySignedIn: () => {},
+        }),
+      );
+    return {
+      account: signedOut(false),
+      accountBusy: signedOut(true),
+      welcomeAccount: renderToStaticMarkup(createElement(AccountStepView, { auth: "signed-out", user: null, ...handlers })),
+      welcomeAi: renderToStaticMarkup(createElement(SignInToUseKeyView, handlers)),
+      seedProfile: renderToStaticMarkup(SeedPool({}) as ReactElement),
+      seedOnboarding: renderToStaticMarkup(SeedPool({ onboarding: true }) as ReactElement),
+    };
+  }
+
+  it("GitHub then Google on the shared buttons, Google then GitHub on the seed pool, as before", async () => {
+    stubSettings({ github: true, google: true, email: true });
+    await loadSignInProviders();
+    const now = surfacesNow();
+    for (const surface of ["account", "accountBusy", "welcomeAccount", "welcomeAi"]) {
+      expect(buttonLabels(now[surface]), surface).toEqual(["Sign in with GitHub", "Sign in with Google"]);
+    }
+    for (const surface of ["seedProfile", "seedOnboarding"]) {
+      expect(buttonLabels(now[surface]), surface).toEqual(["Sign in with Google", "Sign in with GitHub"]);
+    }
+  });
+
+  it("every surface's markup is byte-identical to the markup before this change", async () => {
+    stubSettings({ github: true, google: true, email: true });
+    await loadSignInProviders();
+    const now = surfacesNow();
+    for (const [surface, before] of Object.entries(BEFORE)) expect(sha256(now[surface]), surface).toBe(before);
+  });
+
+  it("and the same while loading, so nothing moves when the answer arrives", () => {
+    vi.stubGlobal("fetch", vi.fn(() => new Promise(() => {})));
+    const now = surfacesNow();
+    for (const [surface, before] of Object.entries(BEFORE)) expect(sha256(now[surface]), surface).toBe(before);
   });
 });
