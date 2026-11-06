@@ -252,6 +252,57 @@ function locateEntry(evidence: string, entries: CorpusEntry[], preferId?: string
 }
 
 /**
+ * R-BYOK-2 (2026-11-05): the words by which a sentence of a paper states what
+ * is new about the work or how it compares with prior work. Matched on the
+ * normalised quote (lower case, letter-hyphens folded: "state-of-the-art" is
+ * "stateoftheart"). A fixed list on purpose: a paper that states its novelty
+ * in other words loses the line (an omission), and a line is never shown on
+ * a sentence that only describes the method or the data — the D-BYOK-2
+ * evidence ("Uses a minimal twenty-point synthetic set ...") had no such
+ * sentence behind it.
+ */
+const NOVELTY_CUES: readonly RegExp[] = [
+  /\bnovel(?:ty)?\b/,
+  /\bfor the first time\b/,
+  /\b(?:is|are|was|were|be|being) the first\b/,
+  /\bthe first (?:to|study|work|report|demonstration|method|approach|attempt)\b/,
+  /\bfirstever\b/,
+  /\bto (?:the best of )?our knowledge\b/,
+  /\bunlike\b/,
+  /\bin contrast (?:to|with)\b/,
+  /\bcontrary to\b/,
+  /\bas opposed to\b/,
+  /\b(?:compared|comparison|relative) (?:to|with)\b/,
+  /\boutperform(?:s|ed|ing)?\b/,
+  /\bsurpass(?:es|ed|ing)?\b/,
+  /\bimprov(?:e|es|ed|ing|ement|ements) (?:on|over|upon)\b/,
+  /\bbetter than\b/,
+  /\b(?:prior|previous|previously|existing|earlier|conventional|traditional|classical) (?:[a-z0-9]+ ){0,2}(?:work|works|method|methods|approach|approaches|study|studies|literature|research|model|models|technique|techniques|system|systems|design|designs|art|result|results|report|reports|reported|findings)\b/,
+  /\bstate ?of ?the ?art\b|\bstateoftheart\b/,
+  /\b(?:than|over|against) (?:the |all |several |strong |existing )?baselines?\b/,
+  /\b(?:has|have|had) (?:not|never) been\b/,
+  /\bno (?:prior|previous|existing|earlier)\b/,
+  /\b(?:a|an) new (?:[a-z0-9]+ )?(?:method|approach|framework|model|algorithm|technique|architecture|class|paradigm|benchmark|dataset)\b/,
+  /首次|首个|首创|不同于|与.{0,12}(?:相比|不同)|相较|优于|新颖|现有(?:方法|研究|工作)|以往|已有研究|传统方法/u,
+];
+
+/** R-BYOK-2: true when the sentence states a novelty or a comparison with prior work. */
+export function statesNoveltyOrComparison(sentence: string): boolean {
+  const normalized = normalizeForMatch(sentence);
+  return NOVELTY_CUES.some((cue) => cue.test(normalized));
+}
+
+/**
+ * R-BYOK-2: the corpus entry holding a novelty line's evidence — the same
+ * whole-quote match as every claim — when that quote itself states the
+ * novelty or the prior-work comparison; null otherwise.
+ */
+function noveltyEntry(evidence: string, entries: CorpusEntry[]): CorpusEntry | null {
+  if (!statesNoveltyOrComparison(evidence)) return null;
+  return locateEntry(evidence, entries);
+}
+
+/**
  * P4-04 (§1h.8 (8)): what the page shows of a quote the entry holds — `shapeEvidenceQuote`, the
  * same function the explain box calls: the quote to its sentence boundaries, or with "…" at the
  * cut. The quote as the sanitizer cleaned it when the entry's own characters cannot be lined up.
@@ -313,7 +364,10 @@ export function locateSection(
  * relation item or next step whose evidence is not in the corpus; set
  * `evidenceWhere` on the survivors; count the drops into
  * `provenance.droppedClaims`. Tier 1 passes the abstract alone; Tier 2 passes
- * the extracted document as well.
+ * the extracted document as well. R-BYOK-2: a "new here" line or a result's
+ * novelty line is dropped and counted unless its evidence is in the corpus
+ * AND states the novelty or the comparison with prior work
+ * (`statesNoveltyOrComparison`).
  */
 export function verifyReportEvidence(
   report: PaperReport,
@@ -346,15 +400,49 @@ export function verifyReportEvidence(
     },
   };
 
+  // R-BYOK-2: a result's novelty line stays only with a verified sentence of
+  // the text that states the novelty or the comparison with prior work; the
+  // result itself stays on its own evidence either way.
+  verified.resultsAndSignificance.keyResults = verified.resultsAndSignificance.keyResults.map((result) => {
+    if (!result.novelty) return result;
+    const grounded = result.noveltyEvidence ? noveltyEntry(result.noveltyEvidence, entries) : null;
+    if (grounded && result.noveltyEvidence) {
+      return { ...result, noveltyEvidence: shown(grounded, result.noveltyEvidence), noveltyEvidenceWhere: grounded.where };
+    }
+    dropped += 1;
+    const bare = { ...result };
+    delete bare.novelty;
+    delete bare.noveltyEvidence;
+    delete bare.noveltyEvidenceWhere;
+    return bare;
+  });
+
   // Free prose has no evidence field of its own. Retain it only when the
   // text itself is present in the source; unrelated claims cannot verify it.
   if (!locateEntry(report.whatItProposes.summary, entries)) {
     verified.whatItProposes.summary = verified.whatItProposes.methods[0]?.evidence ?? "";
   }
+  // R-BYOK-2: a "new here" line is shown only with a verified sentence that
+  // states the novelty or the prior-work comparison. Nothing is written in
+  // its place; every line removed is counted.
+  delete verified.whatItProposes.newHere;
+  delete verified.whatItProposes.newHereClaims;
   if (report.whatItProposes.newHere) {
-    const supported = report.whatItProposes.newHere.filter((text) => locateEntry(text, entries));
-    if (supported.length) verified.whatItProposes.newHere = supported;
-    else delete verified.whatItProposes.newHere;
+    const claims = report.whatItProposes.newHereClaims ?? [];
+    const kept: Claim[] = [];
+    for (const line of report.whatItProposes.newHere) {
+      const claim = claims.find((c) => c.text === line);
+      const entry = claim ? noveltyEntry(claim.evidence, entries) : null;
+      if (!claim || !entry) {
+        dropped += 1;
+        continue;
+      }
+      kept.push({ text: line, evidence: shown(entry, claim.evidence), evidenceWhere: entry.where });
+    }
+    if (kept.length > 0) {
+      verified.whatItProposes.newHere = kept.map((claim) => claim.text);
+      verified.whatItProposes.newHereClaims = kept;
+    }
   }
   if (!locateEntry(report.resultsAndSignificance.summary, entries)) {
     verified.resultsAndSignificance.summary = verified.resultsAndSignificance.keyResults[0]?.evidence ?? "";

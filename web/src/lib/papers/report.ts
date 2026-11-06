@@ -82,10 +82,17 @@ export interface PaperReportKeyResult {
   evidenceWhere?: string;
   /**
    * Restored from the pre-2026-09 report: one sentence on what is new about
-   * THIS result against prior work. Peer's reading, not a quote — it carries
-   * no evidence sentence and the page labels it as Peer's.
+   * THIS result against prior work. The line is Peer's prose, but since
+   * R-BYOK-2 (2026-11-05) it is shown only with `noveltyEvidence`: a verbatim
+   * sentence of the text the model read that itself states the novelty or the
+   * comparison with prior work. `verifyReportEvidence` removes — and counts —
+   * a novelty line without one; the result itself stays on its own evidence.
    */
   novelty?: string;
+  /** R-BYOK-2: the sentence of the paper that states `novelty`; set only with it. */
+  noveltyEvidence?: string;
+  /** R-BYOK-2: where `noveltyEvidence` was found, set by `verifyReportEvidence`. */
+  noveltyEvidenceWhere?: string;
   /**
    * Deep-report only: figure label this result should reference (e.g.
    * "Figure 3"), chosen by post-report figure binding. Null/absent when no
@@ -139,9 +146,18 @@ export interface PaperReport {
      * S6 (2026-09): ≤2 short "new here" lines — the novelty, stated only
      * where it differs from `summary`. Folded into this one section along
      * with the old "What is new" block, which duplicated `summary`'s
-     * content; Peer's reading, no evidence sentence.
+     * content; Peer's reading. Since R-BYOK-2 (2026-11-05) a line is shown
+     * only with a verbatim sentence of the text that states the novelty or
+     * the comparison with prior work (`newHereClaims`); after
+     * `verifyReportEvidence` this list is exactly those claims' `text`.
      */
     newHere?: string[];
+    /**
+     * R-BYOK-2: each `newHere` line (`text`, the same string) with the
+     * paper's sentence that states it (`evidence`, verified, `evidenceWhere`
+     * set). A line without such a claim is removed and counted.
+     */
+    newHereClaims?: Claim[];
     /**
      * Deep-report only: figure label promoted to the proposal area. Used when
      * a figure is reused by multiple result cards, or when the proposal itself
@@ -329,14 +345,50 @@ function keyResult(value: unknown): PaperReportKeyResult | null {
   // No "Key result N" label is invented for a result the model left unnamed,
   // and no result without its receipt survives.
   if (!title || !detail || !evidence) return null;
-  const novelty = text(value.novelty, REPORT_CAPS.noveltyChars);
+  // R-BYOK-2: `novelty` and the sentence that states it (`noveltyEvidence`);
+  // a model that nests them as `novelty: { text, evidence }` is read the same.
+  // Carried through here, held to the text in `verifyReportEvidence`.
+  const nested = isRecord(value.novelty) ? value.novelty : null;
+  const novelty = text(nested ? nested.text : value.novelty, REPORT_CAPS.noveltyChars);
+  const noveltyEvidence = text(nested ? nested.evidence : value.noveltyEvidence, REPORT_CAPS.evidenceChars);
   return {
     title,
     detail,
     evidence,
-    ...(novelty ? { novelty } : {}),
+    ...(novelty ? { novelty, ...(noveltyEvidence ? { noveltyEvidence } : {}) } : {}),
     ...figureFields(value),
   };
+}
+
+/**
+ * R-BYOK-2: the proposal's "new here" lines (≤2) and, for each line that came
+ * with one, the sentence of the paper that states it. An item is a string
+ * (no evidence; kept as a line so the verifier counts its drop) or a
+ * `{ text, evidence }` object; `claims` may also be an already-shaped
+ * report's `newHereClaims`, matched to a line by its text.
+ */
+function newHereLines(value: unknown, shaped: unknown): { lines: string[]; claims: Claim[] } {
+  const lines: string[] = [];
+  const claims: Claim[] = [];
+  if (!Array.isArray(value)) return { lines, claims };
+  const known = new Map<string, string>();
+  if (Array.isArray(shaped)) {
+    for (const item of shaped) {
+      if (!isRecord(item)) continue;
+      const line = text(item.text, REPORT_CAPS.noveltyChars);
+      const evidence = text(item.evidence, REPORT_CAPS.evidenceChars);
+      if (line && evidence && !known.has(line)) known.set(line, evidence);
+    }
+  }
+  for (const item of value) {
+    const line = text(isRecord(item) ? item.text : item, REPORT_CAPS.noveltyChars);
+    if (!line) continue;
+    lines.push(line);
+    const evidence = isRecord(item) ? text(item.evidence, REPORT_CAPS.evidenceChars) : known.get(line) ?? "";
+    if (evidence) claims.push({ text: line, evidence });
+    if (lines.length >= REPORT_CAPS.novelty) break;
+  }
+  return { lines, claims };
 }
 
 function reviewSections(value: unknown): PaperReportReviewSection[] {
@@ -604,19 +656,18 @@ export function sanitizePaperReport(
 
   // S6: the model's field is `newHere`; a v5-shaped cached/replayed object
   // may still carry the old `novelty` key, so accept either while nothing
-  // new is ever asked to produce it.
-  const newHere = strings(
-    proposes.newHere ?? proposes.novelty,
-    REPORT_CAPS.novelty,
-    REPORT_CAPS.noveltyChars,
-  );
+  // new is ever asked to produce it. R-BYOK-2: each line may carry the
+  // sentence that states it; `newHereClaims` holds those, the verifier
+  // removes every line without one.
+  const newHere = newHereLines(proposes.newHere ?? proposes.novelty, proposes.newHereClaims);
 
   const report: PaperReport = {
     skim: claims(r.skim, REPORT_CAPS.skim, REPORT_CAPS.skimChars),
     whatItProposes: {
       summary: text(proposes.summary, REPORT_CAPS.summaryChars),
       methods: claims(proposes.methods, REPORT_CAPS.methods),
-      ...(newHere.length > 0 ? { newHere } : {}),
+      ...(newHere.lines.length > 0 ? { newHere: newHere.lines } : {}),
+      ...(newHere.claims.length > 0 ? { newHereClaims: newHere.claims } : {}),
       ...figureFields(proposes),
     },
     resultsAndSignificance: {

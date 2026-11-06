@@ -79,7 +79,15 @@ describe("a report without questions is the report it was (§1g.3)", () => {
     expected.report.whatItProposes.summary = SENT.methods;
     delete expected.report.whatItProposes.newHere;
     expected.report.resultsAndSignificance.summary = SENT.results;
+    // Re-aimed for R-BYOK-2 (W25, 2026-11-05): RAW's "new here" line and its
+    // result's novelty ("First count of cracks.") carry no sentence of the
+    // paper that states them, so both are removed and both are counted —
+    // the baseline's one drop becomes three. Every other byte is unchanged.
+    delete expected.report.resultsAndSignificance.keyResults[0].novelty;
+    expected.report.provenance.droppedClaims += 2;
+    expected.dropped += 2;
     expect(JSON.stringify(verified)).toBe(JSON.stringify(expected));
+    expect(verified.report.resultsAndSignificance.keyResults[0]).not.toHaveProperty("novelty");
     expect(verified.report.whatItProposes.summary).not.toBe(BEFORE.verified.report.whatItProposes.summary);
     expect(verified.report.whatItProposes).not.toHaveProperty("newHere");
     expect(verified.report.resultsAndSignificance.summary).not.toBe(BEFORE.verified.report.resultsAndSignificance.summary);
@@ -495,7 +503,9 @@ describe("answers follow the question's text, position as the fallback (P2-02b)"
     expect(sanitized.provenance).toEqual({ basis: "model-fulltext", droppedClaims: 0 });
 
     const verified = verifyReportEvidence(sanitized, { abstract: ABSTRACT, doc: DOC });
-    expect(verified.dropped).toBe(1);
+    // Re-aimed for R-BYOK-2 (W25): 1 invented skim sentence + RAW's ungrounded
+    // "new here" line + its ungrounded result novelty = 3, still never the 7.
+    expect(verified.dropped).toBe(3);
     expect(verified.report.provenance.droppedClaims).toBe(verified.dropped);
   });
 

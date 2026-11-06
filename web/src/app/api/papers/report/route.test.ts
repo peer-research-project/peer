@@ -341,6 +341,44 @@ describe("POST /api/papers/report streaming", () => {
     expect(report.provenance.droppedClaims).toBe(1);
   });
 
+  // R-BYOK-2 (W25, 2026-11-05): at the abstract tier a novelty line is shown
+  // only on a sentence of the abstract that states the novelty or the
+  // prior-work comparison ("... a 12% improvement over the baseline.").
+  it("R-BYOK-2: keeps a novelty line only on an abstract sentence that states the comparison, and counts the rest", async () => {
+    const generateJsonText = vi.fn().mockResolvedValue(
+      JSON.stringify({
+        ...generatedReport,
+        whatItProposes: {
+          ...generatedReport.whatItProposes,
+          newHere: [
+            "An invented novelty the abstract never states.",
+            { text: "It studies method X.", evidence: abstractSentence },
+          ],
+        },
+        resultsAndSignificance: {
+          summary: generatedReport.resultsAndSignificance.summary,
+          keyResults: [
+            { ...generatedReport.resultsAndSignificance.keyResults[0], novelty: "Beats the baseline by 12%.", noveltyEvidence: resultSentence },
+            { title: "Second", detail: "Method X was studied.", evidence: abstractSentence, novelty: "First study of method X." },
+          ],
+        },
+      }),
+    );
+    mocks.resolveProvider.mockReturnValue({ generateJsonText });
+
+    const report = reportEvent(await readEvents(await POST(request({ paper, stream: true }, "application/json"))));
+
+    expect(report.whatItProposes).not.toHaveProperty("newHere");
+    expect(report.resultsAndSignificance.keyResults).toHaveLength(2);
+    expect(report.resultsAndSignificance.keyResults[0]).toMatchObject({ novelty: "Beats the baseline by 12%.", noveltyEvidence: expect.stringContaining(resultSentence), noveltyEvidenceWhere: "abstract" });
+    expect(report.resultsAndSignificance.keyResults[1]).not.toHaveProperty("novelty");
+    // Two "new here" lines (one bare, one on a sentence that states no novelty) and one bare result novelty.
+    expect(report.provenance.droppedClaims).toBe(3);
+    const prompt = JSON.parse((generateJsonText.mock.calls[0][0] as { userPrompt: string }).userPrompt) as { outputSchema: { resultsAndSignificance: { keyResults: Record<string, string>[] } }; rules: string[] };
+    expect(prompt.outputSchema.resultsAndSignificance.keyResults[0].noveltyEvidence).toContain("states this novelty or the comparison with prior work");
+    expect(prompt.rules.join(" ")).toContain("Never infer a novelty the abstract does not state.");
+  });
+
   it("asks for relationToYourWork only when project is present", async () => {
     const generateJsonText = vi.fn().mockResolvedValue(
       JSON.stringify({
