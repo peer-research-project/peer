@@ -42,6 +42,13 @@ import {
 } from "./use-auth-user";
 import { requestProfileFlush, type AuthOutcome } from "@/components/profile-sync";
 import { useFeedSyncStatus } from "@/components/feed-sync";
+import {
+  SIGN_IN_NOT_SET_UP,
+  noSignInProvider,
+  signInProvidersToShow,
+  useSignInProviders,
+  type SignInProviderFlags,
+} from "@/lib/supabase/sign-in-providers";
 
 /**
  * P6 (ABC-JEV-INTEGRATION.md §1aj, ruled in full at §1al (c)) — Sign out
@@ -535,28 +542,48 @@ export interface SignInButtonsProps {
  * wrapper and spacing (the Account section's markup is unchanged by the split).
  * Presentational: the caller decides what a press does, including where the
  * browser comes back to after sign-in.
+ *
+ * R-AUTH-PROV — a button is drawn only for a provider the configured Supabase
+ * project has on (`useSignInProviders`, read once per page load); until that
+ * is known, and if it cannot be read, both are drawn as before.
  */
-export function SignInButtons({ busy, onSignInGitHub, onSignInGoogle }: SignInButtonsProps) {
+export function SignInButtons(props: SignInButtonsProps) {
+  return <SignInButtonsView {...props} providers={useSignInProviders()} />;
+}
+
+export interface SignInButtonsViewProps extends SignInButtonsProps {
+  /** The project's answer (`useSignInProviders`); null while unknown. */
+  providers: SignInProviderFlags | null;
+}
+
+/** `SignInButtons` with the project's answer handed in, for static tests. */
+export function SignInButtonsView({ busy, onSignInGitHub, onSignInGoogle, providers }: SignInButtonsViewProps) {
+  const shown = signInProvidersToShow(providers);
+  if (noSignInProvider(shown)) return <p className="text-meta text-text-muted">{SIGN_IN_NOT_SET_UP}</p>;
   return (
     <>
-      <button
-        type="button"
-        onClick={onSignInGitHub}
-        disabled={busy}
-        className={buttonVariants({ tone: "surface", size: "md" })}
-      >
-        <GitHubMark />
-        Sign in with GitHub
-      </button>
-      <button
-        type="button"
-        onClick={onSignInGoogle}
-        disabled={busy}
-        className={buttonVariants({ tone: "surface", size: "md" })}
-      >
-        <GoogleMark />
-        Sign in with Google
-      </button>
+      {shown.github && (
+        <button
+          type="button"
+          onClick={onSignInGitHub}
+          disabled={busy}
+          className={buttonVariants({ tone: "surface", size: "md" })}
+        >
+          <GitHubMark />
+          Sign in with GitHub
+        </button>
+      )}
+      {shown.google && (
+        <button
+          type="button"
+          onClick={onSignInGoogle}
+          disabled={busy}
+          className={buttonVariants({ tone: "surface", size: "md" })}
+        >
+          <GoogleMark />
+          Sign in with Google
+        </button>
+      )}
     </>
   );
 }

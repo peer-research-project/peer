@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { signInWithGitHub, signInWithGoogle } from "@/components/account/use-auth-user";
 import { useSyncGate } from "@/components/profile-sync";
+import { SIGN_IN_NOT_SET_UP, noSignInProvider, signInProvidersToShow, useSignInProviders, type SignInProviderFlags } from "@/lib/supabase/sign-in-providers";
 import { forgetSeedPaper, getSeedPool, saveSeedPool, SeedPoolRequestError, uploadSeedPaper, type SeedPoolEditor } from "@/lib/seed-pool/client-api";
 import type { SeedPaper } from "@/lib/seed-pool/types";
 import { buttonVariants } from "@/components/ui/button";
@@ -47,8 +48,18 @@ export function SeedPool({ onboarding = false, onProgress }: { onboarding?: bool
   const auth = useSyncGate((s) => s.authOutcome);
   const owner = useSyncGate((s) => s.authUserId);
   if (auth === "unknown") return <p className="text-body-sm text-text-faint">Checking your account…</p>;
-  if (auth !== "signed-in" || !owner) return <div className="space-y-3 text-body-sm text-text-muted"><p className="leading-relaxed measure-ui">Sign in to add seed papers. You can skip this optional step.</p>{auth !== "unconfigured" && <div className="flex flex-wrap gap-3"><button type="button" className={SIGN_IN_ACTION} onClick={() => void signInWithGoogle(onboarding ? "/welcome?step=seed" : "/profile#seed-pool")}>Sign in with Google</button><button type="button" className={SIGN_IN_ACTION} onClick={() => void signInWithGitHub(onboarding ? "/welcome?step=seed" : "/profile#seed-pool")}>Sign in with GitHub</button></div>}</div>;
+  if (auth !== "signed-in" || !owner) return <div className="space-y-3 text-body-sm text-text-muted"><p className="leading-relaxed measure-ui">Sign in to add seed papers. You can skip this optional step.</p>{auth !== "unconfigured" && <SeedPoolSignIn returnTo={onboarding ? "/welcome?step=seed" : "/profile#seed-pool"} />}</div>;
   return <OwnerSeedPool key={owner} onboarding={onboarding} onProgress={onProgress} />;
+}
+
+/** R-AUTH-PROV: the signed-out pool's sign-in buttons, Google first, each drawn only for a provider the configured
+ *  Supabase project has on (read once per page load; both while unknown or unreadable). */
+function SeedPoolSignIn({ returnTo }: { returnTo: string }) { return <SeedPoolSignInView returnTo={returnTo} providers={useSignInProviders()} />; }
+/** `SeedPoolSignIn` with the project's answer handed in, for static tests. */
+export function SeedPoolSignInView({ returnTo, providers }: { returnTo: string; providers: SignInProviderFlags | null }) {
+  const shown = signInProvidersToShow(providers);
+  if (noSignInProvider(shown)) return <p className="leading-relaxed measure-ui">{SIGN_IN_NOT_SET_UP}</p>;
+  return <div className="flex flex-wrap gap-3">{shown.google && <button type="button" className={SIGN_IN_ACTION} onClick={() => void signInWithGoogle(returnTo)}>Sign in with Google</button>}{shown.github && <button type="button" className={SIGN_IN_ACTION} onClick={() => void signInWithGitHub(returnTo)}>Sign in with GitHub</button>}</div>;
 }
 
 /** The key at the caller discards the entire editor immediately on account change. */
