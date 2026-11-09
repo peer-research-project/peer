@@ -75,6 +75,18 @@ export function noSignInProvider(shown: SignInProviderFlags): boolean {
   return !shown.github && !shown.google;
 }
 
+/**
+ * D-AUTH-PROV-1 (2026-11-09) — the line above the buttons names only the
+ * providers whose buttons are drawn, GitHub first like the buttons. With none
+ * on there is no line (null): the rule-3 sentence already says sign-in is not
+ * set up, and "Sign in with … " above it would contradict it.
+ */
+export function signInSentence(shown: SignInProviderFlags): string | null {
+  const names = [shown.github && "GitHub", shown.google && "Google"].filter(Boolean);
+  if (names.length === 0) return null;
+  return `Sign in with ${names.join(" or ")} to sync saves and reads across your devices.`;
+}
+
 /** The buttons to draw for an answer; an unknown answer draws today's two. */
 export function signInProvidersToShow(answer: SignInProviderFlags | null): SignInProviderFlags {
   return answer ?? ALL_SIGN_IN_PROVIDERS;

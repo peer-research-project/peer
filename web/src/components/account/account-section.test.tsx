@@ -436,6 +436,42 @@ function renderAccountView(overrides: Partial<AccountSectionViewProps> = {}): st
   return renderToStaticMarkup(createElement(AccountSectionView, props));
 }
 
+describe("AccountSectionView — D-AUTH-PROV-1: the signed-out line names only the providers that are on", () => {
+  const SENTENCE_TAIL = "to sync saves and reads across your devices.";
+  const signedOut = (signInProviders: AccountSectionViewProps["signInProviders"]) =>
+    renderAccountView({ authKind: "signed-out", user: null, signInProviders });
+
+  it("GitHub only: names GitHub and never Google", () => {
+    const html = signedOut({ github: true, google: false });
+    expect(html).toContain(`Sign in with GitHub ${SENTENCE_TAIL}`);
+    expect(html).not.toContain("GitHub or Google");
+  });
+
+  it("Google only: names Google and never GitHub", () => {
+    const html = signedOut({ github: false, google: true });
+    expect(html).toContain(`Sign in with Google ${SENTENCE_TAIL}`);
+    expect(html).not.toContain("GitHub or Google");
+  });
+
+  it("both on, and unknown (null or not handed in): today's line, both names, GitHub first", () => {
+    for (const html of [signedOut({ github: true, google: true }), signedOut(null), signedOut(undefined)]) {
+      expect(html).toContain(`Sign in with GitHub or Google ${SENTENCE_TAIL}`);
+    }
+  });
+
+  it("none on: no line at all, so nothing contradicts the not-set-up sentence", () => {
+    const html = signedOut({ github: false, google: false });
+    expect(html).not.toContain(SENTENCE_TAIL);
+  });
+
+  it("the page's wrapper hands the view the same one answer the buttons read", () => {
+    const source = readFileSync(join(process.cwd(), "src", "components", "account", "account-section.tsx"), "utf8");
+    const wrapper = source.slice(source.indexOf("export function AccountSection("), source.indexOf("export interface SignInButtonsProps"));
+    expect(wrapper).toMatch(/const signInProviders = useSignInProviders\(\);/);
+    expect(wrapper).toMatch(/signInProviders=\{signInProviders\}/);
+  });
+});
+
 describe("AccountSectionView — P6 sign-out warning, both branches by props (§1al (c))", () => {
   it("nothing unsynced (confirmingSignOut=false): Sign out works exactly as today — one plain form, no warning text", () => {
     const html = renderAccountView({ confirmingSignOut: false });
