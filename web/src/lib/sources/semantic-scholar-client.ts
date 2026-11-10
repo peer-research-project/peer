@@ -45,21 +45,29 @@ function waitMs(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function acquireSlot(): Promise<void> {
+async function acquireSlot(deadline: number): Promise<boolean> {
   const myTurn = admission.then(async () => {
     while (active >= MAX_CONCURRENT) {
-      await waitMs(25);
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) return false;
+      await waitMs(Math.min(25, remaining));
     }
     const wait = lastStart + minIntervalMs() - Date.now();
+    // A caller that cannot start before its deadline must not reserve a
+    // future interval: it will never make a request, and doing so would
+    // delay every live caller queued behind it.
+    if (Date.now() + Math.max(0, wait) >= deadline) return false;
     if (wait > 0) await waitMs(wait);
+    if (Date.now() >= deadline) return false;
     lastStart = Date.now();
     active += 1;
+    return true;
   });
   // Swallow here (not at the caller) so one rejected admission never breaks
   // the chain for everyone queued behind it; the caller still awaits
   // `myTurn` directly and sees any rejection itself.
-  admission = myTurn.catch(() => {});
-  await myTurn;
+  admission = myTurn.then(() => {}, () => {});
+  return myTurn;
 }
 
 function releaseSlot(): void {
@@ -82,13 +90,17 @@ async function attemptFetch(
   timeoutMs: number,
   deadline = Infinity,
 ): Promise<Response | null> {
-  const slot = acquireSlot();
+  const slot = acquireSlot(deadline);
+  let acquired: boolean;
   if (Number.isFinite(deadline)) {
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const acquired = await Promise.race([slot.then(() => true), new Promise<false>((resolve) => { timer = setTimeout(() => resolve(false), Math.max(0, deadline - Date.now())); })]);
+    acquired = await Promise.race([slot, new Promise<false>((resolve) => { timer = setTimeout(() => resolve(false), Math.max(0, deadline - Date.now())); })]);
     if (timer) clearTimeout(timer);
-    if (!acquired) { void slot.then(releaseSlot); return null; }
-  } else await slot;
+    // If the deadline wins a race with an already-granted slot, release
+    // that slot once. An expired admission does not hold a slot at all.
+    if (!acquired) { void slot.then((granted) => { if (granted) releaseSlot(); }); return null; }
+  } else acquired = await slot;
+  if (!acquired) return null;
   try {
     const remaining = deadline - Date.now();
     if (remaining <= 0) return null;

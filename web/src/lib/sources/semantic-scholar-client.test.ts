@@ -157,6 +157,54 @@ describe("fetchSemanticScholar — concurrency cap + minimum interval", () => {
     expect(globalThis.fetch).toHaveBeenCalledTimes(1);
   });
 
+  it("skips expired queued callers without consuming the next rate-limit interval", async () => {
+    vi.stubEnv("SEMANTIC_SCHOLAR_API_KEY", "test-key");
+    const starts: string[] = [];
+    globalThis.fetch = vi.fn(async (url) => {
+      starts.push(String(url));
+      return new Response("{}", { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const first = fetchSemanticScholar("https://example.test/first", {}, 500, { deadline: Date.now() + 500, maxRetries: 0 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect((await first)?.status).toBe(200);
+
+    const expired = [1, 2, 3].map((n) => fetchSemanticScholar(`https://example.test/expired-${n}`, {}, 500, { deadline: Date.now() + 100, maxRetries: 0 }));
+    const current = fetchSemanticScholar("https://example.test/current", {}, 500, { deadline: Date.now() + 2_000, maxRetries: 0 });
+    await vi.advanceTimersByTimeAsync(1_499);
+    expect(starts).toEqual(["https://example.test/first"]);
+    expect(await Promise.all(expired)).toEqual([null, null, null]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect((await current)?.status).toBe(200);
+    expect(starts).toEqual(["https://example.test/first", "https://example.test/current"]);
+  });
+
+  it("skips a timed-out waiter when both concurrent slots were occupied", async () => {
+    vi.stubEnv("SEMANTIC_SCHOLAR_API_KEY", "");
+    const pending: Array<() => void> = [];
+    const starts: string[] = [];
+    globalThis.fetch = vi.fn(async (url) => {
+      starts.push(String(url));
+      if (starts.length <= 2) await new Promise<void>((resolve) => pending.push(resolve));
+      return new Response("{}", { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const first = fetchSemanticScholar("https://example.test/first");
+    const second = fetchSemanticScholar("https://example.test/second");
+    await vi.advanceTimersByTimeAsync(350);
+    expect(starts).toHaveLength(2);
+    const expired = fetchSemanticScholar("https://example.test/expired", {}, 500, { deadline: Date.now() + 100, maxRetries: 0 });
+    const current = fetchSemanticScholar("https://example.test/current", {}, 500, { deadline: Date.now() + 2_000, maxRetries: 0 });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(await expired).toBeNull();
+    pending.shift()!();
+    await vi.advanceTimersByTimeAsync(250);
+    expect((await current)?.status).toBe(200);
+    expect(starts).toEqual(["https://example.test/first", "https://example.test/second", "https://example.test/current"]);
+    pending.shift()!();
+    await Promise.all([first, second]);
+  });
+
   it("does not retry a 429 when the caller sets zero retries", async () => {
     globalThis.fetch = vi.fn(async () => new Response("", { status: 429 })) as unknown as typeof fetch;
     const result = fetchSemanticScholar("https://api.semanticscholar.org/1", {}, 500, { deadline: Date.now() + 5_000, maxRetries: 0 });

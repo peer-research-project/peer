@@ -18,11 +18,12 @@ function memoryStorage(): Storage {
  const map = new Map<string, string>();
  return { get length() { return map.size; }, clear: () => map.clear(), getItem: (key) => map.get(key) ?? null, key: (i) => [...map.keys()][i] ?? null, removeItem: (key) => void map.delete(key), setItem: (key, value) => void map.set(key, String(value)) };
 }
-async function open(p: Paper) { const mounted = await hookRuntime.mount(() => ReadingAvailability({ paper: p })); mounted.unmount(); return mounted.value; }
+const mountedCards: Array<{ unmount: () => void }> = [];
+async function open(p: Paper) { const mounted = await hookRuntime.mount(() => ReadingAvailability({ paper: p })); mountedCards.push(mounted); return mounted.value; }
 const textOf = (value: ReturnType<typeof ReadingAvailability>) => value.props.children;
 const settle = () => new Promise((resolve) => setTimeout(resolve, 10));
 beforeEach(() => { vi.stubGlobal("localStorage", memoryStorage()); vi.stubGlobal("window", globalThis); });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { mountedCards.splice(0).forEach((mounted) => mounted.unmount()); vi.unstubAllGlobals(); });
 
 describe("availability uses the current source identity", () => {
  it("rejects a forged response identity without caching or showing readable", async () => {
