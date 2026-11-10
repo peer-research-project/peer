@@ -12,17 +12,17 @@
   <a href="CONTRIBUTOR_GUIDE.md">Contributor guide</a>
 </p>
 
-Peer brings relevant papers together in a focused daily briefing, then gives you a place to read and keep notes. Tell it what you work on, and refine your interests as your research changes.
+Peer helps you discover, read, and remember research that matters to you. Start with your interests and let your briefing evolve with your work.
 
-## A briefing for your field
+## Start with what matters to you
 
-Follow the topics and research interests that matter to you. Peer brings papers from sources including OpenAlex, arXiv, PubMed, Semantic Scholar, and DBLP into one focused briefing.
+Choose your topics and research interests to shape a daily briefing. Peer brings together papers from OpenAlex, arXiv, PubMed, Semantic Scholar, DBLP, and other sources.
 
-![Peer briefing showing a grid of research paper cards](assets/screenshots/briefing.jpg)
+![Choose research topics during setup in Peer](assets/screenshots/topics.jpg)
 
 ## Read with context
 
-Open an available paper in Peer to navigate its sections and read its text, figures, tables, and equations together. Highlight passages and collect your thoughts in a dedicated notes workspace. When readable full text is unavailable, follow the link to the source.
+Navigate a paper by section and read its text, figures, tables, and equations in one place. Highlight passages and collect your thoughts in a dedicated notes workspace. When readable full text is unavailable, follow the link to the source.
 
 ![Peer reader showing a paper outline and typeset equations](assets/screenshots/reader.jpg)
 
@@ -30,7 +30,7 @@ Open an available paper in Peer to navigate its sections and read its text, figu
 
 ## Search beyond the briefing
 
-Look up papers by topic, title, author, or venue, and narrow results with filters.
+Search by topic, title, author, or venue, then narrow the results with filters.
 
 ![Peer search showing results for neural networks](assets/screenshots/search.jpg)
 
