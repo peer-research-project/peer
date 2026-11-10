@@ -514,13 +514,13 @@ describe("on a phone the tab's rect and the paper's text column do not intersect
 });
 
 describe("the tab's behaviour is as it was (P12-77 E1)", () => {
-  it("is one button that presses to open and reports expanded; a press that began elsewhere still passes through it", () => {
+  it("is one navigation button; a press that began elsewhere still passes through it", () => {
     for (const shown of [false, true]) {
       const html = view({ shown });
 
       expect(html.match(/<button\b/g)).toHaveLength(1);
       expect(html).toContain('type="button"');
-      expect(html).toContain(`aria-expanded="${shown}"`);
+      expect(html).not.toContain("aria-expanded");
       expect(classesOf(html)).toContain(EDGE_TAB_PASSES_DRAG);
     }
   });
@@ -541,6 +541,6 @@ describe("the tab's behaviour is as it was (P12-77 E1)", () => {
     const row = renderToStaticMarkup(createElement(NotesButtonView, { variant: "row", has: true, onOpen: () => {} }));
 
     expect(row).not.toMatch(/--tab-foot|top-\[|h-\[\d+px\]/);
-    expect(classesOf(row)).toContain("w-full");
+    expect(classesOf(row)).toContain("reader-action");
   });
 });

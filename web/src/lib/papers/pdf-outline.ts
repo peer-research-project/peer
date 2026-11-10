@@ -1027,7 +1027,7 @@ function longestClearRun(rows: Row[], x0: number, width: number): Row[] {
 /**
  * The gutter of a page set in two columns, or null.
  *
- * A 2-em band is slid across the middle of the text's width, and the band
+ * A 1.5-em band is slid across the middle of the text's width, and the band
  * that stays empty for the most consecutive rows is the candidate. It is a
  * gutter when that run is at least `GUTTER_MIN_ROWS` rows with text on both
  * sides in at least that many of them, each side spans a good share of the
@@ -1256,8 +1256,8 @@ export function bodyStyle(lines: PdfLine[]): BodyStyle {
  *  wording are a templated paragraph, or a repeated one, not a head. */
 const FURNITURE_MIN_PAGES = 3;
 /** The page's top or bottom band: this many of its rows from either edge. A head and a rule, a folio and a
- *  journal line, an author line above them: three. Wording mid-page, or the fifth row down, is the body's. */
-const FURNITURE_BAND_ROWS = 3;
+ *  journal line, or a four-line journal footer. Wording mid-page, or the fifth row down, is the body's. */
+const FURNITURE_BAND_ROWS = 4;
 /** A running head is on this share of the pages of the paper (P12-97, R-F: the pages that carry text). */
 const FURNITURE_SHARE = 0.4;
 /** A page carries text when it has this many lines: a page of figure text, a plate or a title page has fewer, and
@@ -1898,6 +1898,9 @@ function candidateOf(line: PdfLine, body: { size: number; font: string }): strin
   const bigger = line.size >= body.size * HEADING_SIZE_RATIO;
   const otherFace = line.font !== body.font && line.size >= body.size * 0.95;
   if (!bigger && !otherFace) return null;
+  // A font change can be an inline emphasis inside prose. A lowercase opening
+  // at ordinary text size is a continuation, not a new unnumbered heading.
+  if (!numbered && !bigger && /^[‘“"'([{]*\p{Ll}/u.test(text)) return null;
   // An unnumbered heading is a word: "Abstract", "Discussion". A row of
   // symbols set in the maths face ("qe,ic0,1 ka,ic0,iqe,1") is an equation
   // the page happens to set apart.
@@ -2890,6 +2893,13 @@ function openingStart(
   while (at > 0 && (isProse(live[at - 1]) || lines[live[at - 1]].text.trim().length <= OPENING_MARK_MAX)) at--;
   if (at === 0) return 0;
   const above = lines[live[at - 1]];
+  // A numbered heading may wrap into a lowercase line in the same face. The
+  // continuation is not itself a heading, but the prose still belongs below it.
+  if (at >= 2) {
+    const prior = lines[live[at - 2]];
+    const priorHeading = headingOf(prior, body);
+    if (priorHeading && sectionNumberOf(priorHeading) && above.font !== body.font && wrapsHeading(prior, above, above.text)) return 0;
+  }
   if (headingOf(above, body) !== null) {
     let stack = 0;
     for (let k = at - 1; k >= 0 && headingOf(lines[live[k]], body) !== null; k--) stack++;
@@ -3164,7 +3174,18 @@ export function buildOutline(pages: PdfPageText[], prior: Gutter | null = gutter
       if (full.length > 0) figureCaptions.push({ ...caption, caption: full });
       continue;
     }
-    const next = headingOf(line, body);
+    let next = headingOf(line, body);
+    // A long, ordinary-size line in an alternate font immediately following
+    // prose is usually a continuation with inline emphasis, not a heading.
+    const previousProse = held.at(-1);
+    if (next && !sectionNumberOf(next) && next.length > 40 && line.size < body.size * HEADING_SIZE_RATIO && previousProse?.page === line.page && previousProse.font === body.font && previousProse.y > line.y && previousProse.y - line.y <= body.size * 1.35) next = null;
+    // A numbered heading can wrap onto a lowercase line in the same face.
+    if (!next && heading !== null && sectionNumberOf(heading) && line.font !== body.font && wrapsHeading(lastHeading, line, line.text)) {
+      heading = joinLines(heading, line.text.trim(), vocab);
+      lastHeading = line;
+      canonical = canonicalizeHeading(heading);
+      continue;
+    }
     if (next) {
       if (heading !== null && wrapsHeading(lastHeading, line, next)) {
         heading = joinLines(heading, next, vocab);

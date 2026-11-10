@@ -34,7 +34,7 @@ import { BackToFeedLink } from "@/components/navigation/back-to-feed-link";
 import { hasImmediateFeedHistoryEntry } from "@/lib/navigation/feed-history";
 import { NONE } from "@/lib/navigation/card-focus";
 import { paperNav } from "@/lib/reader/paper-nav";
-import { paperKeysFor, registerReaderActions, selectionActions, type ReaderActions } from "@/lib/reader/reader-keys";
+import { registerReaderActions, selectionActions, type ReaderActions } from "@/lib/reader/reader-keys";
 import { recommendationLine } from "@/lib/reader/recommendation";
 import { scrollBehavior } from "@/lib/reader/scroll-motion";
 import { allocatePlateTerms } from "@/lib/papers/plate-terms";
@@ -42,6 +42,7 @@ import { mergeTerms, paperDefinedTermsInReading, routeTermScope, termScopeKey, t
 import { placeEvidence } from "@/lib/papers/evidence";
 import {
   PDF_NO_TEXT_MESSAGE,
+  availabilityAsksForKey,
   describeAvailability,
   sharedTerms,
   type AvailabilityReport,
@@ -50,7 +51,8 @@ import {
 import { readingToMarkdown } from "@/lib/papers/reading-markdown";
 import type { Claim, PaperReport } from "@/lib/papers/report";
 import type { Route } from "next";
-import { aiAvailability, explainWindowAvailable } from "@/lib/feed/ai-tier";
+import { aiAvailability, explainWindowAvailable, keyNeedsSignIn } from "@/lib/feed/ai-tier";
+import { paperReturnPath } from "@/lib/navigation/add-key-destination";
 import { useSyncGate } from "@/components/profile-sync";
 import { PaperPlate, isSameFigure, leadCaption, leadFigurePending } from "@/components/cards/paper-plate";
 import { SwipeableCard } from "@/components/cards/swipe-card";
@@ -76,7 +78,6 @@ import { moreReply, replyPair, requestReply, type ReplyResult } from "@/componen
 import { sayPlainly, type PlainTarget, type PlainView } from "@/components/reader/plain-button";
 import { RecordBlock } from "@/components/reader/record-block";
 import { InYourLibrary } from "@/components/reader/in-your-library";
-import { KeyLegend } from "@/components/reader/key-legend";
 import { DecisionBlock } from "@/components/reader/decision-block";
 import { QuoteList } from "@/components/reader/quote-list";
 import { ClaimList } from "@/components/reader/claim-list";
@@ -103,11 +104,13 @@ import {
 } from "@/components/reader/reader-layout";
 import { THUMB_BAR_PX, THUMB_BAR_QUERY } from "@/components/shell/thumb-bar";
 import { PAGE_CLASS, SPREAD_GRID } from "@/components/reader/spread";
+import { BookReader } from "@/components/reader/book-reader";
 import { sentencesWhileWaiting, useReading } from "@/components/reader/use-reading";
 import { useParagraphGuide } from "@/components/reader/use-paragraph-guide";
 import { useStructureReview } from "@/components/reader/use-structure-review";
 import { PaperNotes } from "@/components/notes/paper-notes";
 import { NotesButton } from "@/components/notes/notes-button";
+import { usePaperNotes } from "@/components/notes/paper-notes";
 import { PAPER_BODY_ID } from "@/components/reader/paper-body";
 import { QuestionField, focusFirstEmptyQuestion } from "@/components/reader/question-field";
 import { ReadingMapView, readingRoute } from "@/components/reader/reading-map";
@@ -135,12 +138,11 @@ import { prepareExplainSelection } from "@/lib/reader/explain-range";
 import { paragraphKey, usePlainRewritesStore } from "@/store/plain-rewrites";
 import { PLAIN_DEFAULT_LEVEL, PLAIN_REWRITE_ENABLED, isPlainLevel, type PlainLevel } from "@/lib/papers/plain-levels";
 import { exampleQuestions } from "@/lib/reader/question-examples";
-import { deepReportRequested, useModelReport } from "@/components/reader/use-model-report";
+import { deepReportRequested, reportForReading, useModelReport } from "@/components/reader/use-model-report";
 import { usePrivateSupplement } from "@/components/reader/use-private-supplement";
 import { PrivatePdfStatus } from "@/components/reader/private-pdf-status";
 import { UploadButton } from "@/components/briefing/upload-button";
 import { useAuthUser } from "@/components/account/use-auth-user";
-import { useUploadsAvailable, uploadsReady } from "@/lib/papers/use-uploads-available";
 import {
   BODY,
   NOT_FOUND,
@@ -571,7 +573,7 @@ export default function PaperReadingPage({
     apiFetch<Paper>(
       isUploadId
         ? `/api/papers/upload/${encodeURIComponent(id.slice("upload:".length))}`
-        : `/api/papers/${encodeURIComponent(id)}`,
+        : `/api/papers/${encodeURIComponent(id)}?sourceVersion=2`,
       controller ? { signal: controller.signal } : undefined,
     )
       .then((p) => {
@@ -684,7 +686,6 @@ function Reader({
   // existing saved upload's own view/delete actions (those never call
   // `hostedUploadsEnabled()`). Skipped entirely on an upload's own page,
   // where that entry point never renders anyway (see `uploadAction` below).
-  const uploadsAvailable = uploadsReady(useUploadsAvailable(!originalPaper.id.startsWith("upload:")));
   const profile = useProfileStore((s) => s.profile);
   const feedPapers = useFeedStore((s) => s.papers);
   const markRead = useFeedStore((s) => s.markRead);
@@ -746,7 +747,7 @@ function Reader({
   // holds — here, in the browser, from the `items` the page last read (P7-13:
   // up to 250 ms behind the typing).
   const tier0Route = useMemo(() => readingRoute(reading, asked), [reading, asked]);
-  const report = model.report;
+  const report = reportForReading(model.report, reading);
   // P2-04: all route consumers receive this one display route. Tier 0 still
   // stands unchanged if there is no verified report/question overlay. P2-04b:
   // the map and the body both take it as a `DrawRoute`
@@ -809,6 +810,8 @@ function Reader({
   const authOutcome = useSyncGate((s) => s.authOutcome);
   const aiMode = aiAvailability(profile, authOutcome);
   const providerConfigured = aiMode !== "none";
+  // A key saved while signed out is not used: the sentence and its link ask for a sign-in, not a key.
+  const signInForKey = keyNeedsSignIn(profile, authOutcome);
   // P8-06: the always-on explain window is the one surface that does not wait for the sign-in check when the reader's key is
   // their own local one — it is in the first paint, with its 376 px (`explainWindowAvailable`, `lib/feed/ai-tier.ts`).
   const explainCanAsk = explainWindowAvailable(profile, authOutcome);
@@ -817,7 +820,7 @@ function Reader({
   // for a day, on the reader's own key — and absent without one. P3-05 (§1h.8 (1)): it
   // reads the paper's body, so it is written only when a deep report is:
   // `deepReportRequested`, the report hook's own predicate (the Deep report switch, or an
-  // attached PDF, and a model), fed what the report hook is fed — the paper's text leaves
+  // attached or standalone uploaded PDF (R-BYOK-1), and a model), fed what the report hook is fed — the paper's text leaves
   // for a model on one switch. The reader's own key travels as the explain box sends it.
   const { gists: paragraphGists, partition: paragraphPartition } = useParagraphGuide({
     paper: ready ? paper : undefined,
@@ -967,9 +970,9 @@ function Reader({
   );
   const explainOpen = useRef<(() => void) | null>(null);
   const openExplain = useCallback(() => explainOpen.current?.(), []);
-  // P10-09a (review 7.1, 8.4): "Take notes" on the selection — a numbered sticky note at the right, saved into the
-  // paper's own note. The pill that offers it and "Explain this" is `SelectionToolbar` (mounted by the box below).
-  const takeNote = useTakeNote({ paper, questions: settledQuestions(asked), forYourQuestions: report?.forYourQuestions, body: reading?.body, onUnavailable: (reason) => showToast(reason) });
+  // Keep the selected passage with the paper's notes, then open the notes page.
+  const { open: openNotes } = usePaperNotes({ paper, questions: settledQuestions(asked), forYourQuestions: report?.forYourQuestions });
+  const takeNote = useTakeNote({ paper, questions: settledQuestions(asked), forYourQuestions: report?.forYourQuestions, body: reading?.body, onCreated: openNotes, onUnavailable: (reason) => showToast(reason) });
   // P11-17b (owner item 8; B P11-04 §5; ruling §1h.112): "Highlight" on the selection — the passage painted in the paper (Yellow, black words), kept as a
   // block of the paper's own note, the colour strip raised in the margin. Beside `takeNote`, with the same inputs. A Tier 0 act: it needs no key and no
   // model, so the toolbar offers it whether or not the page can explain (`canHighlight` below is its own gate, never `canExplain`'s: a paragraph, a heading or a caption of the
@@ -990,6 +993,7 @@ function Reader({
   const clearExplain = useCallback(() => selectExplain(null), [selectExplain]);
   const startOfTab = useCallback(() => scrollToTabStart(spread, document), [spread]);
   const { tab, select: selectTab, reveal } = useReaderTab({ hasBody, onChange: clearExplain, atStart: startOfTab });
+  const enterBookView = useCallback(() => selectTab("digestion"), [selectTab]);
   // P11-17b (rule 3; C P11-14's defect (c)): the notes' blue square for a note taken on a Summary block goes to that block, which stands only under the
   // "Summary" tab. The sticky notes register `reveal` for a paper's paragraphs (Paper digestion); this is the same for the Summary — the square asks the
   // page to show the Summary tab, and the jump follows once its blocks are on the page. A paper with no body has no tabs and is on its Summary always.
@@ -1094,12 +1098,13 @@ function Reader({
       providerConfigured,
       profileHasProject,
       modelFailed: model.failed,
+      keyNeedsSignIn: signInForKey,
     });
     // P12-58 (rule 3): while the full text has not settled, the abstract-only sentence is not true of the
     // paper — it is not read yet. `sentencesWhileWaiting` puts one calm line in its place (and, after three
     // minutes of asking, one that says so and points at the reload); a model's own sentence stays.
     return sentencesWhileWaiting(described, wait, availability !== null);
-  }, [reading, availability, providerConfigured, profileHasProject, model.failed, wait]);
+  }, [reading, availability, providerConfigured, profileHasProject, model.failed, wait, signInForKey]);
 
   // The plate's own terms — allocated across the briefing when the paper is
   // in it, so the plate here is the plate on the card; alone otherwise.
@@ -1373,15 +1378,17 @@ function Reader({
   // it to have matched; a deep link has no reason to show.
   const recommendation =
     nav.index !== NONE && profile.researchTopics.length > 0 ? reason : null;
-  // No provider means the sentence names a key; the link is the way to one.
-  // A record-only page names no key, so it gets no link.
-  const sectionsRead =
-    reading.provenance.fullText === "html" || reading.provenance.fullText === "pdf";
-  const showAddKey =
-    !providerConfigured &&
-    !report &&
-    reading.omitted.some((entry) => entry.reason === "needs_key") &&
-    !(reading.provenance.abstract === "none" && !sectionsRead);
+  // The link follows the sentence: it is drawn only when the sentence on screen
+  // names a key (the link is the way to one) or, with a key saved and the reader
+  // signed out (`signInForKey`), a sign-in (the link reads "Sign in" and comes
+  // back here). A sentence that asks for neither — a record-only page, a PDF
+  // with no text, a model on the page — gets no link.
+  const showAddKey = availabilityAsksForKey({
+    reading,
+    report: availability,
+    providerConfigured,
+    keyNeedsSignIn: signInForKey,
+  });
 
   const keyResults = report?.resultsAndSignificance.keyResults ?? [];
   const methods = report?.whatItProposes.methods ?? [];
@@ -1435,7 +1442,7 @@ function Reader({
 
   // P11-20 follow-up (ruling §1h.120): one element, two places — the commands' last row in one column, the details' head in the three panes
   // (`decision-block.tsx` draws it where the window says).
-  const uploadAction = !paper.id.startsWith("upload:") && uploadsAvailable ? <UploadButton targetPaper={paper} onUploaded={setUpload} /> : undefined;
+  const uploadAction = !paper.id.startsWith("upload:") ? <UploadButton targetPaper={paper} onUploaded={setUpload} /> : undefined;
 
   return (
     // `tabIndex={-1}`: Next's layout router focuses the segment's first
@@ -1450,7 +1457,7 @@ function Reader({
     <PageContainer
       width="reader"
       rhythm="reader"
-      className={`${PAGE_CLASS} md:pb-16 outline-none`}
+      className={`${PAGE_CLASS} reader-paper-view md:pb-16 outline-none`}
       tabIndex={-1}
       style={readingScaleStyle}
       // S22: withZoomTransition's own document.querySelector target — the
@@ -1467,7 +1474,7 @@ function Reader({
       <ReaderLayout
         spread={spread}
         plate={
-          !hasPlate ? null : (
+          !hasPlate || (spread && !plateIsFigure && !leadPending) ? null : (
           // A real figure: the caption is the image's, read once, from the
           // figcaption. First on the page: the rail — position and the way
           // back — is the masthead's on desktop and the thumb bar's on a phone.
@@ -1532,6 +1539,7 @@ function Reader({
           <DecisionBlock
             part="details"
             sentences={sentences}
+            compactDetails={hasBody && !model.failed}
             // P11-20 (item 2a): in the panes the fixed zone holds the title alone; the venue, byline, affiliation and recommendation head the details.
             paper={paper}
             recommendation={recommendation}
@@ -1539,6 +1547,8 @@ function Reader({
             uploadAction={uploadAction}
             doi={paper.doi}
             showAddKey={showAddKey}
+            keyNeedsSignIn={signInForKey}
+            signInReturnTo={paperReturnPath(paper.id)}
             uploadStatus={upload ? <PrivatePdfStatus upload={upload}
               attachedToTitle={!paper.id.startsWith("upload:") ? paper.title : undefined}
               onDeleted={() => {
@@ -1552,6 +1562,7 @@ function Reader({
         progress={<DecisionBlock part="progress" stage={model.stage} />}
         // P7-14 (R10): the strip under the decision block, only on a paper Peer has read in full.
         tabs={hasBody ? <ReaderTabs tab={tab} onSelect={selectTab} /> : undefined}
+        bookHint={!hasBody && fromServer ? <p className="reader-book-hint">Book view needs full text</p> : undefined}
         tab={hasBody ? tab : undefined}
         // P10-04 (review 3.1): the map (P1-04, §1f.12: from the reading the server built, absent without a body)
         // stands directly under the strip and floats with it, under both tabs; it is the paper's one contents
@@ -1576,6 +1587,12 @@ function Reader({
         // `data-explain-source="summary"`; `contents` keeps the wrapper out of the layout, so nothing moves.
         words={digestion ? null : (
           <div data-explain-source="summary" className="contents">
+            {!hasBody && reading.abstract.sentences.length === 0 && !report?.skim?.length && (
+              <div className="border-l-2 border-accent pl-4 py-1">
+                <h2 className="text-title font-medium text-heading">No abstract available</h2>
+                <p className="mt-2 max-w-[48ch] text-body leading-relaxed text-text-muted">{paper?.abstractRetrieval?.status === "blocked" ? (paper.abstractRetrieval.attempts.some((attempt) => attempt.httpStatus === 451) ? "A source restricted access for legal reasons. Open the source to read the original record." : paper.abstractRetrieval.attempts.some((attempt) => attempt.httpStatus === 401) ? "A source requires authentication to retrieve the abstract. Open the source to read the original record." : "A source blocked the abstract request. Open the source to read the original record.") : paper?.abstractRetrieval?.status === "transient" ? "Abstract retrieval was temporarily unavailable. Try again later or open the source." : "Peer could not retrieve an abstract for this paper. Open the source to read the original record."}</p>
+              </div>
+            )}
             <PaperWords
               endRef={wordsEndRef}
               reading={reading}
@@ -1587,12 +1604,13 @@ function Reader({
             />
           </div>
         )}
-        additions={digestion ? (
+        additions={<BookReader available={hasBody} showingPaper={digestion} onEnter={enterBookView}>
+          {digestion ? (
           <>
             {/* P7-14 (R10): Paper digestion — the paper: everything the extractor read. Its map
                 (P1-04, R5) is the layout's `map` slot now (P10-04), under the strip, under both tabs. */}
             {/* The paper, when Peer reached it. */}
-            <PaperBody reading={reading} route={route} plain={plainForBody} onSelect={selectExplain} noteAnchors={noteAnchors} onHighlightClick={(id, rect) => useHighlightStrip.getState().show(id, rect.top)} />
+            <PaperBody reading={reading} route={route} title={paper?.title} keywords={paper?.summaryExperimentKeywords} plain={plainForBody} onSelect={selectExplain} noteAnchors={noteAnchors} onHighlightClick={(id, rect) => useHighlightStrip.getState().show(id, rect.top)} />
           </>
         ) : (
           <div data-explain-source="summary" className="contents">
@@ -1700,10 +1718,6 @@ function Reader({
               <GlanceBlock paper={paper} now={now} stagger={stagger++} />
             </SummaryBlock>
 
-            <SummaryBlock id={SUMMARY_ID.related}>
-              <RelatedBlock related={related} now={now} stagger={stagger++} />
-            </SummaryBlock>
-
             {/* ── The blocks the rewrite added, kept under the old report ── */}
 
             <SummaryBlock id={SUMMARY_ID.caveats}>
@@ -1744,16 +1758,20 @@ function Reader({
                 under the same topics, and the topics as searches. On a paper
                 with no full text this stands where the column used to end
                 in air. */}
+            <SummaryBlock id={SUMMARY_ID.related}>
+              <RelatedBlock related={related} now={now} stagger={stagger++} />
+            </SummaryBlock>
+
             <SummaryBlock id={SUMMARY_ID.library}>
               <InYourLibrary paper={paper} />
             </SummaryBlock>
           </div>
         )}
+        </BookReader>}
         next={<NextRow nav={nav} next={nextPaper} />}
       />
       </SectionLinks>
       <ReaderToast toast={toast} />
-      <KeyLegend keys={paperKeysFor({ upload: isUploadId })} />
     </PageContainer>
     {/* P3-02: outside the zoomed container — the button and the card are placed
         in the window's pixels, which a `zoom` on an ancestor would scale — and
@@ -1768,7 +1786,7 @@ function Reader({
     {/* P10-09a (review 7.1, 8.4; ruling §1h.78): the pill above a selection with "Explain this" and "Take notes", and
         the sticky notes it opens at the right. Fixed, in the window's pixels, like the box above. P11-17b: and "Highlight" — wherever `canHighlight`
         accepts the selection (a paragraph, a heading or a caption of the paper's body; since P11-28 a Summary block or an answer), with or without a key. */}
-    <SelectionToolbar target={explainTarget} canExplain={selectionCanExplain({ canAsk: explainCanAsk, terms, passage: explainTarget?.unavailableReason ? null : explainTarget?.passage ?? null })} onExplain={openExplain} onTakeNote={takeNote} onHighlight={highlight} canHighlight={canHighlight(explainTarget)} />
+    <SelectionToolbar target={explainTarget} canExplain={selectionCanExplain({ canAsk: explainCanAsk, terms, passage: explainTarget?.unavailableReason ? null : explainTarget?.passage ?? null })} onExplain={openExplain} onTakeNote={takeNote} onHighlight={highlight} onBold={(target) => highlight(target, "bold")} onCircle={(target) => highlight(target, "circle")} canHighlight={canHighlight(explainTarget)} />
     <StickyNotes key={paper.id} paper={paper} reveal={reveal} />
     {/* P11-15 (owner item 1): a figure opened from the paper's body, in the margin's stack, or the lightbox where there is no margin. One per paper, as the stickies: the store's keys repeat across papers. Its key is not the stickies' (a sibling's), or React meets two children with one key. */}
     <FigureHost key={`figure:${paper.id}`} />
@@ -1776,10 +1794,6 @@ function Reader({
         on a mark (`onHighlightClick` above). One per paper, as the stickies and the figure host: it hides the strip when it unmounts. Outside the zoom
         container, as the cards are: it is placed in the window's pixels. */}
     <HighlightStripHost key={`highlight-strip:${paper.id}`} paperId={paper.id} />
-    {/* P7-14 (R9): the notes, as a small tab fixed at the window's right edge (from `md`; a phone has
-        the row in the command stack instead). Beside the explain box, for the same reason: it is
-        placed in the window's pixels, which the zoom on the page container would scale. */}
-    <NotesButton variant="edge" paper={paper} questions={settledQuestions(asked)} forYourQuestions={report?.forYourQuestions} />
     </>
   );
 }

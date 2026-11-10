@@ -22,7 +22,9 @@ import { highlightQuote, highlightSegments, readHighlight } from "@/lib/notes/bl
 import { highlightColour, highlightPaint, isHighlightColour } from "@/lib/notes/highlight-colours";
 import type { Block, BlockType, HighlightColourId, HighlightSpot } from "@/lib/notes/types";
 import { useLostPassages } from "@/store/notes";
+import { READING_IDENTITY_EVENT } from "@/lib/papers/reading-identity";
 import { HighlightSwatches } from "./highlight-strip";
+import "./highlight-row.css";
 import { PASSAGE_LOST_LINE, goToPassage, passageIsLost, storedBodyOf, type HighlightGoal } from "./note-tags";
 
 /** The most lines of its words the row shows (the `line-clamp-2` below); the rest is cut with an ellipsis. The whole passage stays in the page, and in the tooltip. */
@@ -57,7 +59,8 @@ export function highlightIsLost(
 
 const subscribeToStorage = (onChange: () => void) => {
   window.addEventListener("storage", onChange);
-  return () => window.removeEventListener("storage", onChange);
+  window.addEventListener(READING_IDENTITY_EVENT, onChange);
+  return () => { window.removeEventListener("storage", onChange); window.removeEventListener(READING_IDENTITY_EVENT, onChange); };
 };
 
 /** `highlightIsLost` for a row: told by the reading page, or found in the stored body; never on the server's render or the first one. */
@@ -82,9 +85,11 @@ export function withHighlightColour(blocks: Block[], id: string, colour: Highlig
   let touched = false;
   const next = blocks.map((b) => {
     const spot = b.id === id ? readHighlight(b) : null;
-    if (!spot || b.highlight?.colour === colour) return b;
+    if (!spot || (b.highlight?.colour === colour && !spot.mark)) return b;
     touched = true;
-    return { ...b, highlight: { ...spot, colour } };
+    const highlight = { ...spot };
+    delete highlight.mark;
+    return { ...b, highlight: { ...highlight, colour } };
   });
   return touched ? next : blocks;
 }
@@ -126,7 +131,7 @@ export interface HighlightRowViewProps {
   /** The highlight's block id. */
   id: string;
   /** Its words and colour, or null for a block that holds no readable highlight (stored data is read with care, B P11-04 I8). */
-  spot: (Pick<HighlightSpot, "quote" | "colour"> & { grouped?: boolean }) | null;
+  spot: (Pick<HighlightSpot, "quote" | "colour" | "mark"> & { grouped?: boolean }) | null;
   /** The paper no longer holds its words. */
   lost: boolean;
   /** The six swatches are open under the row. */
@@ -142,6 +147,7 @@ export interface HighlightRowViewProps {
 export function HighlightRowView({ id, spot, lost, open, onGo, onToggle, onPick, onRemove, rootRef, onKeyDown }: HighlightRowViewProps) {
   const named = spot ? highlightColour(spot.colour) : null;
   const paint = spot ? highlightPaint(spot.colour, 0) : null;
+  const markName = spot?.mark === "bold" ? "Bold" : spot?.mark === "circle" ? "Circle" : null;
   return (
     <div ref={rootRef} data-highlight-row={id} onKeyDown={onKeyDown} className="min-w-0">
       <div className="flex items-start gap-2 font-reading text-body-sm leading-[1.5]">
@@ -152,8 +158,8 @@ export function HighlightRowView({ id, spot, lost, open, onGo, onToggle, onPick,
             title="Go to the passage"
             onMouseDown={keep}
             onClick={onGo}
-            style={{ width: "1em", height: "1em", marginTop: "calc(0.25em + 2px)", fontSize: "inherit", backgroundColor: named.fill }}
-            className="shrink-0 border border-border-strong p-0 opacity-90 transition-opacity hover:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-heading"
+            style={{ width: "1em", height: "1em", marginTop: "calc(0.25em + 2px)", fontSize: "inherit", backgroundColor: markName ? "transparent" : named.fill }}
+            className={`shrink-0 border border-border-strong p-0 opacity-90 transition-opacity hover:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-heading${spot.mark === "circle" ? " reading-note-marker-circle" : ""}`}
           />
         ) : (
           // A passage that is gone has no square to go to it; this holds its place so the rows keep their line (P10-36).
@@ -162,7 +168,7 @@ export function HighlightRowView({ id, spot, lost, open, onGo, onToggle, onPick,
         <div className="min-w-0 flex-1">
           {spot && paint ? (
             <p title={spot.quote} className="line-clamp-2 break-words py-[2px] font-reading text-body-sm leading-[1.5]">
-              <span data-highlight-words="" style={{ backgroundColor: paint.bg, color: paint.ink }} className="box-decoration-clone px-0.5">
+              <span data-highlight-words="" style={spot.mark === "bold" ? { fontWeight: 700 } : spot.mark === "circle" ? undefined : { backgroundColor: paint.bg, color: paint.ink }} className={`box-decoration-clone px-0.5${spot.mark === "circle" ? " reading-note-circle" : ""}`}>
                 {spot.quote}
               </span>
             </p>
@@ -175,21 +181,21 @@ export function HighlightRowView({ id, spot, lost, open, onGo, onToggle, onPick,
           <button
             type="button"
             data-highlight-colour-button=""
-            aria-label={named.name}
+            aria-label={markName ?? named.name}
             aria-expanded={open}
-            title={`${named.name} — change the colour`}
+            title={markName ? `${markName} — change to a highlight colour` : `${named.name} — change the colour`}
             onMouseDown={keep}
             onClick={onToggle}
             className="flex h-6 shrink-0 items-center gap-1 px-1.5 font-mono text-caption text-text-muted transition-colors hover:bg-bg-secondary hover:text-heading focus-visible:bg-bg-secondary focus-visible:outline-none"
           >
-            <span>{named.name}</span>
+            <span>{markName ?? named.name}</span>
             <span aria-hidden>▾</span>
           </button>
         )}
         <button
           type="button"
-          aria-label="Remove highlight"
-          title="Remove highlight"
+          aria-label={markName ? "Remove mark" : "Remove highlight"}
+          title={markName ? "Remove mark" : "Remove highlight"}
           onMouseDown={keep}
           onClick={onRemove}
           className="grid h-6 w-6 shrink-0 place-items-center text-body text-text-muted transition-colors hover:bg-bg-secondary hover:text-heading focus-visible:bg-bg-secondary focus-visible:outline-none"
@@ -232,7 +238,7 @@ export function HighlightRow({ block, onColour, onRemove }: { block: Block; onCo
   return (
     <HighlightRowView
       id={block.id}
-      spot={spot ? { quote: highlightQuote(spot), colour: spot.colour, grouped: (spot.segments?.length ?? 0) > 1 } : null}
+      spot={spot ? { quote: highlightQuote(spot), colour: spot.colour, mark: spot.mark, grouped: (spot.segments?.length ?? 0) > 1 } : null}
       lost={lost}
       open={open && spot !== null}
       onGo={() => {

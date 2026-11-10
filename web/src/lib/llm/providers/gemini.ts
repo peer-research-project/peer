@@ -22,7 +22,7 @@ export type ModelTarget = {
   tier: ModelTier;
 };
 
-// The server's own Vertex project. Global endpoint only, by the founder's
+// The server's own Vertex project. Global endpoint only, by the owner's
 // call (2026-09-14): Gemini 3 is served from nowhere else — measured on this
 // project, every 3.x id answered 404 on us-central1 and 200 on global — and
 // the retired 2.5 family is not kept as a regional fallback. Small before
@@ -408,6 +408,11 @@ export const geminiProvider: DigestProvider = {
   },
 };
 
+/** The reader's-key check (`testConnection`): a one-line prompt and a short cap. */
+export const KEY_CHECK_SYSTEM_PROMPT = "Reply with JSON.";
+export const KEY_CHECK_USER_PROMPT = '{"ping":true}';
+export const KEY_CHECK_MAX_TOKENS = 32;
+
 export function createGeminiApiProvider(
   apiKey: string,
   modelChain: ModelTarget[] = GEMINI_API_MODEL_CHAIN,
@@ -533,10 +538,17 @@ export function createGeminiApiProvider(
       throw new Error("All Gemini API vision calls returned empty response");
     },
 
+    // "Check key" (`app/api/ai/check-key`) runs this on the reader's own key, so it is
+    // the smallest request that proves the key works: a one-line system prompt and a
+    // short cap, the same ping the OpenAI, Qwen and DeepSeek providers send. It used
+    // to carry the whole digest system prompt.
     async testConnection(): Promise<{ ok: boolean; error?: string }> {
       if (!apiKey) return { ok: false, error: "GOOGLE_API_KEY not set" };
       try {
-        await callApiModel(modelChain[0].id, "ping", DIGEST_SYSTEM_PROMPT, { path: "test" });
+        await callApiModel(modelChain[0].id, KEY_CHECK_USER_PROMPT, KEY_CHECK_SYSTEM_PROMPT, {
+          maxTokens: KEY_CHECK_MAX_TOKENS,
+          path: "test",
+        });
         return { ok: true };
       } catch (err) {
         return { ok: false, error: String(err) };

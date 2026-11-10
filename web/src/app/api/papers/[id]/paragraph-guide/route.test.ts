@@ -405,15 +405,60 @@ describe("POST /api/papers/[id]/paragraph-guide — private uploads", () => {
     expect(response.headers.get("x-robots-tag")).toBe("noindex, noarchive");
   });
 
+  it.each(["replaced", "deleted"])("rejects a warm cached guide when the upload is %s during full-text retrieval", async (change) => {
+    const docHash = explainDocHash(doc);
+    paragraphGuideCache.set(docHash, { docHash, gists: GISTS_KEPT });
+    let release!: (value: { status: "ok"; doc: ExtractedDocument; attempts: [] }) => void;
+    let started!: () => void;
+    const reading = new Promise<void>((resolve) => { started = resolve; });
+    mocks.getFullText.mockImplementationOnce(() => { started(); return new Promise((resolve) => { release = resolve; }); });
+    mocks.ownedUpload.mockResolvedValue({ revision: 1, paperIds: [UPLOAD] });
+    const response = call(ask({ paper: uploadPaper }), UPLOAD);
+    await reading;
+    mocks.ownedUpload.mockResolvedValue(change === "replaced" ? { revision: 2, paperIds: [UPLOAD] } : null);
+    release({ status: "ok", doc, attempts: [] });
+    const result = await response;
+    expect(result.status).toBe(410);
+    expect(await json(result)).toEqual({ error: "Upload no longer available" });
+    expect(result.headers.get("cache-control")).toBe("private, no-store");
+    expect(provider.generateJsonText).not.toHaveBeenCalled();
+  });
+
+  it("does not send extracted text to the model when an upload changes during retrieval", async () => {
+    let release!: (value: { status: "ok"; doc: ExtractedDocument; attempts: [] }) => void;
+    let started!: () => void;
+    const reading = new Promise<void>((resolve) => { started = resolve; });
+    mocks.getFullText.mockImplementationOnce(() => { started(); return new Promise((resolve) => { release = resolve; }); });
+    mocks.ownedUpload.mockResolvedValue({ revision: 1, paperIds: [UPLOAD] });
+    const response = call(ask({ paper: uploadPaper }), UPLOAD);
+    await reading;
+    mocks.ownedUpload.mockResolvedValue(null);
+    release({ status: "ok", doc, attempts: [] });
+    expect((await response).status).toBe(410);
+    expect(provider.generateJsonText).not.toHaveBeenCalled();
+    expect(paragraphGuideCache.size()).toBe(0);
+  });
+
+  it("still returns a warm guide when ownership and revision remain current", async () => {
+    const docHash = explainDocHash(doc);
+    paragraphGuideCache.set(docHash, { docHash, gists: GISTS_KEPT });
+    mocks.ownedUpload.mockResolvedValue({ revision: 1, paperIds: [UPLOAD] });
+    const response = await call(ask({ paper: uploadPaper }), UPLOAD);
+    expect(response.status).toBe(200);
+    expect((await json(response)).cached).toBe(true);
+    expect(provider.generateJsonText).not.toHaveBeenCalled();
+    expect(mocks.ownedUpload).toHaveBeenCalledTimes(2);
+  });
+
   it("is 410 when the upload was replaced or deleted while the model was working, and remembers nothing", async () => {
-    mocks.ownedUpload.mockResolvedValueOnce({ revision: 3, paperIds: [UPLOAD] }).mockResolvedValueOnce({ revision: 4, paperIds: [UPLOAD] });
+    mocks.ownedUpload.mockResolvedValueOnce({ revision: 3, paperIds: [UPLOAD] }).mockResolvedValueOnce({ revision: 3, paperIds: [UPLOAD] }).mockResolvedValueOnce({ revision: 4, paperIds: [UPLOAD] });
     const replaced = await call(ask({ paper: uploadPaper }), UPLOAD);
 
     expect(replaced.status).toBe(410);
     expect(replaced.headers.get("cache-control")).toBe("private, no-store");
     expect(paragraphGuideCache.size()).toBe(0);
 
-    mocks.ownedUpload.mockResolvedValueOnce({ revision: 3, paperIds: [UPLOAD] }).mockResolvedValueOnce(null);
+    mocks.ownedUpload.mockResolvedValueOnce({ revision: 3, paperIds: [UPLOAD] }).mockResolvedValueOnce({ revision: 3, paperIds: [UPLOAD] }).mockResolvedValueOnce(null);
     expect((await call(ask({ paper: uploadPaper }), UPLOAD)).status).toBe(410);
     expect(paragraphGuideCache.size()).toBe(0);
   });

@@ -14,19 +14,25 @@ const read = (path: string) => readFileSync(join(process.cwd(), path), "utf8");
 const page = read("src/app/welcome/page.tsx");
 
 describe("the welcome wizard asks for no events or jobs", () => {
-  it("has no Data step: six steps, in order, none labelled Data", () => {
+  // OWN-KEY lane 4: Account joined the list, first; the property pinned here
+  // (no Data step, and the paper steps in their order) is unchanged.
+  it("has no Data step and includes the optional seed step in order", () => {
     expect(STEP_META.map((step) => step.key)).toEqual([
+      "account",
       "basics",
       "topics",
       "work",
+      "seed", // Optional seed papers; Jev and Data remain absent.
       "radar",
       "ai",
       "persona",
     ]);
     expect(STEP_META.map((step) => step.label)).toEqual([
+      "Account",
       "Basics",
       "Topics",
       "Work",
+      "Seed papers",
       "Radar",
       "AI",
       "Persona",
@@ -43,8 +49,8 @@ describe("the welcome wizard asks for no events or jobs", () => {
   });
 
   it("the Papers field writes straight to the paper topics: nothing is copied into another list", () => {
-    expect(page).toContain("onChangeRequired={store.updateTopics}");
-    expect(page).toContain("onChangeSoft={store.updateSoftTopics}");
+    expect(page).toContain("store.updateTopics([...profile.researchTopics, topic])");
+    expect(page).toContain("onChange={store.updateSoftTopics}");
     expect(page).not.toMatch(/Mirroring|updateEvent|updateJob/);
   });
 

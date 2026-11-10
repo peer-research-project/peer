@@ -39,8 +39,6 @@ import { StarterStrip } from "@/components/briefing/starter-strip";
 import { KeyHint } from "@/components/briefing/key-hint";
 import { STARTER_TOPICS, STARTER_TOPICS_KEY } from "@/lib/feed/starter-topics";
 import { SearchBox } from "@/components/briefing/search-box";
-import { UploadButton } from "@/components/briefing/upload-button";
-import { useUploadsAvailable, uploadsReady } from "@/lib/papers/use-uploads-available";
 import { Band } from "@/components/ui/band";
 import { PaperDigestLoader } from "@/components/digest/daily-digest";
 import { PageContainer } from "@/components/ui/page-container";
@@ -92,7 +90,6 @@ function DailyBriefingPage() {
   // has actually confirmed it can store a new private PDF right now — see
   // use-uploads-available.ts for why "unknown" (the value before this
   // resolves) reads the same as "unavailable".
-  const uploadsAvailable = uploadsReady(useUploadsAvailable());
   // P4-S5a — acknowledges today's batch once its cards are actually in this
   // render and the tab is visible (ABC-JEV-INTEGRATION.md §1p.C.7).
   // `papers.length > 0` is the exact condition that gates the cards grid
@@ -322,7 +319,6 @@ function DailyBriefingPage() {
         // they stand whether or not there is a library or a sample below.
         actions={
           <>
-            {uploadsAvailable && <UploadButton />}
             <SearchBox />
           </>
         }
@@ -368,13 +364,9 @@ function DailyBriefingPage() {
         // "shape of the day" was flat on most days, and whose "dim ones are
         // read" the deck already says in words.
         <Band label={TODAY.heading} gap="none">
-        {/* Masonry, not a fixed grid. Roughly four papers in ten carry an
-            extractable figure, so card heights genuinely differ; a uniform
-            grid either ragged-edges every row or reserves dead space on the
-            six cards with no image. CSS columns let each card be its own
-            height. */}
-        <div className="mt-4 board-columns gap-4 [column-fill:_balance]">
-          {papers.map((paper, index) => (
+        {/* Each row aligns its cards while keeping their content in reading order. */}
+        <div className="briefing-grid mt-4">
+          {papers.map((paper) => (
             <div
               key={paper.id}
               id={`paper-${paper.id}`}
@@ -386,14 +378,12 @@ function DailyBriefingPage() {
               // screenful is still dealt in order, 40ms apart: `useReveal`
               // staggers the hosts that are already on screen when it runs.
               data-reveal
-              className="rv mb-4 break-inside-avoid"
+              className="rv"
             >
               <FeedTile
                 item={{ kind: "paper", data: paper }}
                 plateTerms={plateTerms[paper.id]}
                 line={tileLines[paper.id] ?? null}
-                index={index}
-                total={papers.length}
               />
             </div>
           ))}

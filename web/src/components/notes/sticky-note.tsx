@@ -274,6 +274,7 @@ export function takeStickyNote(
     Partial<Pick<ExplainSelection, "measure" | "bounds" | "source" | "paragraphId" | "segments" | "unavailableReason" | "selectionStillHolds">> & { paragraphText?: string },
   paper: Citable,
   extras?: ReadingNoteExtras,
+  openWindow = true,
 ): { id: string; n: number } | null {
   if (target.unavailableReason || (target.segments && target.measure && !target.measure())) return null;
   if (target.selectionStillHolds && !target.selectionStillHolds()) return null;
@@ -289,8 +290,10 @@ export function takeStickyNote(
   });
   if (!made) return null;
   // R-open: the first card of an empty margin opens level with the selection's first line, as the selection is now.
-  const anchorTop = target.measure?.()?.bounds.top ?? target.bounds?.top;
-  useWindows.getState().open({ id: made.id, kind: "sticky", title: stickyTitle(made.n), ...(anchorTop !== undefined ? { anchorTop } : {}) });
+  if (openWindow) {
+    const anchorTop = target.measure?.()?.bounds.top ?? target.bounds?.top;
+    useWindows.getState().open({ id: made.id, kind: "sticky", title: stickyTitle(made.n), ...(anchorTop !== undefined ? { anchorTop } : {}) });
+  }
   return made;
 }
 
@@ -301,6 +304,7 @@ export function useTakeNote({
   forYourQuestions,
   body,
   onUnavailable,
+  onCreated,
 }: {
   paper: Paper;
   questions?: readonly string[];
@@ -308,13 +312,16 @@ export function useTakeNote({
   /** P10-09f: the paper's body as the page renders it; the paragraph the selection is in gives the anchor its range. */
   body?: readonly { paragraphs: readonly string[] }[];
   onUnavailable?: (reason: string) => void;
+  onCreated?: () => void;
 }): (target: ExplainSelection) => void {
   return useCallback(
     (target: ExplainSelection) => {
       const paragraphText = body?.[target.sectionIndex]?.paragraphs[target.paragraphIndex];
-      if (!takeStickyNote({ ...target, paragraphText }, citableFromPaper(paper), { questions, forYourQuestions })) onUnavailable?.(target.unavailableReason ?? "This selection changed. Select the text again.");
+      const made = takeStickyNote({ ...target, paragraphText }, citableFromPaper(paper), { questions, forYourQuestions }, !onCreated);
+      if (made) onCreated?.();
+      else onUnavailable?.(target.unavailableReason ?? "This selection changed. Select the text again.");
     },
-    [paper, questions, forYourQuestions, body, onUnavailable],
+    [paper, questions, forYourQuestions, body, onCreated, onUnavailable],
   );
 }
 

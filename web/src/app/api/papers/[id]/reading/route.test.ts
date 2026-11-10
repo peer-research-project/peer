@@ -93,9 +93,7 @@ describe("GET /api/papers/[id]/reading", () => {
     // (section ids and the reading map). P8-04: 6 -> 7 (the extractors'
     // sections and buckets changed; see reading.test.ts's note).
     // P9: 7 -> 8 (the PDF text and the cleaner changed: P9-08 / P9-09 / P9-10).
-    // P12-58: 16 -> 17 (`provenance.fullText` gains "pending").
-    // P12-97, RE-AIMED: 17 -> 18 (a figure's own text and the running foot leave an uploaded PDF's paragraphs).
-    expect(body.version).toBe(18);
+    expect(body.version).toBe(20);
     expect(body.paperId).toBe("openalex:W7208807247");
     expect(body.provenance.fullText).toBe("pdf");
     expect(body.provenance.pageCount).toBe(5);
@@ -113,6 +111,13 @@ describe("GET /api/papers/[id]/reading", () => {
       arxivId: null,
       openAlexId: "W7208807247",
     });
+  });
+
+  it.each(["transient", "blocked"] as const)("does not cache an abstract retrieval %s", async (status) => {
+    mocks.fetchPaperById.mockResolvedValue({ ...zenodoItem, abstract: undefined, metadata: { ...zenodoItem.metadata, abstractRetrieval: { status, attempts: [] } } });
+    mocks.getFullText.mockResolvedValue(zenodoFullText);
+    const res = await call("openalex:W7208807247");
+    expect(res.headers.get("cache-control")).toBe("no-store");
   });
 
   it("caches a settled no-full-text outcome too — it is a fact about the paper", async () => {
@@ -377,7 +382,7 @@ describe("GET /api/papers/[id]/reading — 9-14 (A9-13): the ?upload= supplement
     });
     mocks.getFullText.mockResolvedValue(zenodoFullText);
 
-    const res = await call("openalex:W7208807247", "?v=14&upload=upload:0000000000000007");
+    const res = await call("openalex:W7208807247", "?v=18&upload=upload:0000000000000007");
 
     expect(res.status).toBe(200);
     expect(mocks.getFullText).toHaveBeenCalledWith({ paperId: "upload:0000000000000007" });
@@ -445,5 +450,31 @@ describe("GET /api/papers/[id]/reading — P9-42 (§1h.67): a supplement's figur
 
     expect(res.status).toBe(200);
     expect(figureUrls(await res.json())).toEqual(["/api/papers/upload%3A0000000000000009/figure-image?page=3&fig=2&v=" + FIGURE_EXTRACTION_REVISION + ""]);
+  });
+});
+
+describe("reading availability", () => {
+  beforeEach(() => { mocks.fetchPaperById.mockReset(); mocks.getFullText.mockReset(); });
+  it("marks a settled extraction as readable", async () => {
+    mocks.fetchPaperById.mockResolvedValue(zenodoItem);
+    mocks.getFullText.mockResolvedValue(zenodoFullText);
+    const res = await call(zenodoItem.id);
+    expect(res.headers.get("x-peer-readability")).toBe("readable");
+  });
+  it("does not cache an unavailable source as an abstract-only result", async () => {
+    mocks.fetchPaperById.mockResolvedValue(zenodoItem);
+    mocks.getFullText.mockResolvedValue({ status: "no_full_text", attempts: [{ link: { url: "https://example.org", kind: "html", label: "input", rank: 1 }, outcome: "source_unavailable: timed out" }] });
+    const res = await call(zenodoItem.id);
+    expect(res.headers.get("x-peer-readability")).toBe("unknown");
+    expect(res.headers.get("cache-control")).toBe("no-store");
+  });
+});
+
+describe("paper lookup failure", () => {
+  it("returns a retryable error when the source is temporarily unavailable", async () => {
+    mocks.fetchPaperById.mockRejectedValueOnce(new Error("rate limited"));
+    const res = await call("semantic_scholar:cbc4266795a13b6124294e0fb15bfcdcc29417e2");
+    expect(res.status).toBe(503);
+    expect(res.headers.get("cache-control")).toBe("no-store");
   });
 });

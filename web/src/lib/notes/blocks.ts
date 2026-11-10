@@ -326,6 +326,7 @@ export type NoteAnchorMap = Record<
     quote?: string;
     /** P11-07: only on a highlight's spot (`n` is 0 there): the colour its mark wears. */
     colour?: HighlightColourId;
+    mark?: "bold" | "circle";
     /** P11-07: only on a highlight's spot: its block's index in the note, so two marks over one range are laid in the order they were made. */
     order?: number;
     segmentIndex?: number;
@@ -341,7 +342,7 @@ export function anchorMap(note: Pick<Note, "blocks"> | undefined, paperId: strin
       const spot = readHighlight(b);
       if (spot && spot.paperId === paperId) {
         highlightSegments(spot).forEach((segment, segmentIndex) => {
-          (map[segment.paragraphId] ??= []).push({ id: b.id, n: 0, start: segment.start, end: segment.end, quote: segment.quote, colour: spot.colour, order, ...(spot.segments ? { segmentIndex } : {}) });
+          (map[segment.paragraphId] ??= []).push({ id: b.id, n: 0, start: segment.start, end: segment.end, quote: segment.quote, colour: spot.colour, ...(spot.mark === "bold" || spot.mark === "circle" ? { mark: spot.mark } : {}), order, ...(spot.segments ? { segmentIndex } : {}) });
         });
       }
       return;

@@ -57,21 +57,28 @@ export interface UploadBackend {
 // some test runners start from different working directories (repo root vs.
 // `web/`), and `.local-data/uploads` itself is gitignored and may not exist
 // yet on a fresh checkout.
+//
+// W8 R-H3: the `turbopackIgnore` comments tell the production build's file
+// tracer that these runtime paths are not files to ship. Without them it
+// saw `existsSync(<cwd>/next.config.ts)`, concluded the whole project might
+// be read at runtime, and copied all of `web/` (~1,300 files: src, scripts,
+// supabase, docs) into every server function that imports this module.
+// Runtime behaviour is unchanged; the comments only affect tracing.
 export function resolveWebRoot(cwd: string = process.cwd()): string {
-  const candidates = [cwd, path.join(cwd, "web")];
+  const candidates = [cwd, path.join(/*turbopackIgnore: true*/ cwd, "web")];
   for (const candidate of candidates) {
-    if (existsSync(path.join(candidate, "next.config.ts"))) return candidate;
+    if (existsSync(/*turbopackIgnore: true*/ path.join(/*turbopackIgnore: true*/ candidate, "next.config.ts"))) return candidate;
   }
   return cwd;
 }
 
-export const UPLOAD_DIR = process.env.PEER_PRIVATE_UPLOAD_DIR || path.join(resolveWebRoot(), ".local-data", "uploads");
+export const UPLOAD_DIR = process.env.PEER_PRIVATE_UPLOAD_DIR || path.join(/*turbopackIgnore: true*/ resolveWebRoot(), ".local-data", "uploads");
 
 function diskPath(name: string): string {
-  const resolved = path.resolve(UPLOAD_DIR, name);
+  const resolved = path.resolve(/*turbopackIgnore: true*/ UPLOAD_DIR, name);
   // Every name is built by upload-store.ts from validated hashes; this is the
   // belt to that brace, so no name can ever reach outside the directory.
-  if (!resolved.startsWith(path.resolve(UPLOAD_DIR) + path.sep)) throw new Error("Invalid upload object name");
+  if (!resolved.startsWith(path.resolve(/*turbopackIgnore: true*/ UPLOAD_DIR) + path.sep)) throw new Error("Invalid upload object name");
   return resolved;
 }
 

@@ -51,6 +51,7 @@ export interface PdfTextResult {
    * see 1-16.
    */
   status?: number;
+  finalUrl?: string;
   /**
    * 2-06, step (b) — uploads only: page 1's lines as printed, joined with
    * spaces, before any of them is set aside as the cover. The upload route
@@ -59,11 +60,19 @@ export interface PdfTextResult {
    * exactly where a title and a DOI are printed.
    */
   page1Text?: string;
+  /**
+   * R-T1 (W9, 2026-11-04) — uploads only: the PDF's own Info dictionary
+   * /Title, as pdf.js decodes it, untrimmed and unjudged. The layout title
+   * (`doc.title`, the largest words on page 1) is missing when the title line
+   * is set in the body's size; a seed paper falls back to this, after
+   * `seed-pool/features.ts` has refused a generic one. Never a model's guess.
+   */
+  infoTitle?: string;
 }
 
 async function downloadPdf(
   url: string,
-): Promise<{ bytes: Buffer; finalUrl: string } | { error: string; status?: number }> {
+): Promise<{ bytes: Buffer; finalUrl: string } | { error: string; status?: number; finalUrl?: string }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
@@ -81,7 +90,7 @@ async function downloadPdf(
     // reason *string* reached the caller, and "PDF fetch returned 403"
     // matches no paywall-phrase regex, so every hard-403 was reported as
     // plain "source unavailable".
-    if (!res.ok) return { error: `PDF fetch returned ${res.status}`, status: res.status };
+    if (!res.ok) return { error: `PDF fetch returned ${res.status}`, status: res.status, finalUrl: res.url || url };
 
     const lengthHeader = Number.parseInt(res.headers.get("content-length") ?? "", 10);
     if (Number.isFinite(lengthHeader) && lengthHeader > MAX_PDF_BYTES) {
@@ -92,7 +101,7 @@ async function downloadPdf(
     if (bytes.byteLength === 0) return { error: "PDF response was empty." };
     if (bytes.byteLength > MAX_PDF_BYTES) return { error: "PDF too large for safe extraction." };
     if (bytes.subarray(0, 5).toString("ascii") !== "%PDF-") {
-      return { error: "Response was not a PDF (likely a landing/paywall page)." };
+      return { error: "Response was not a PDF." };
     }
     return { bytes, finalUrl: res.url || url };
   } catch (err) {
@@ -111,7 +120,7 @@ const recentBytes = new Map<string, { bytes: Buffer; ts: number }>();
  * of them. Six at most, oldest out first — a few megabytes each, on a
  * function that also holds the text cache.
  */
-export async function getPdfBytes(url: string): Promise<{ bytes: Buffer } | { error: string; status?: number }> {
+export async function getPdfBytes(url: string): Promise<{ bytes: Buffer } | { error: string; status?: number; finalUrl?: string }> {
   const hit = recentBytes.get(url);
   if (hit && Date.now() - hit.ts < BYTES_TTL_MS) return { bytes: hit.bytes };
   const download = await downloadPdf(url);
@@ -158,6 +167,22 @@ async function embeddedTitlesOf(doc: {
  *  for the probes that look at a real PDF's lines when the outline misreads.
  *  The first page also carries the titles the PDF itself holds (`embeddedTitlesOf`), when it holds any. */
 export async function readPages(bytes: Buffer): Promise<PdfPageText[]> {
+  return (await readPdf(bytes)).pages;
+}
+
+/** The PDF's Info /Title from the same open document; nothing when it has
+ *  none or pdf.js cannot read it — never a failed reading. */
+async function infoTitleOf(doc: { getMetadata(): Promise<{ info: unknown }> }): Promise<string | undefined> {
+  try {
+    const title = ((await doc.getMetadata()).info as { Title?: unknown } | null)?.Title;
+    return typeof title === "string" && title.trim() ? title : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** `readPages`, plus the Info /Title (R-T1) — one open of the PDF for both. */
+async function readPdf(bytes: Buffer): Promise<{ pages: PdfPageText[]; infoTitle?: string }> {
   // `unpdf` ships pdf.js built for a server runtime: no worker, no canvas,
   // no native code — the only build that runs unchanged in a function.
   const { getDocumentProxy } = await import("unpdf");
@@ -188,7 +213,7 @@ export async function readPages(bytes: Buffer): Promise<PdfPageText[]> {
   }
   const embedded = pages.length > 0 ? await embeddedTitlesOf(doc) : [];
   if (embedded.length > 0) pages[0].embeddedTitles = embedded;
-  return pages;
+  return { pages, infoTitle: await infoTitleOf(doc) };
 }
 
 /**
@@ -353,7 +378,7 @@ export async function withFigureSizes(doc: ExtractedDocument, bytes: Uint8Array)
 export async function tryExtractPdfText(url: string): Promise<PdfTextResult> {
   const download = await getPdfBytes(url);
   if ("error" in download) {
-    return { ok: false, reason: download.error, status: download.status };
+    return { ok: false, reason: download.error, status: download.status, finalUrl: download.finalUrl };
   }
 
   try {
@@ -368,7 +393,7 @@ export async function tryExtractPdfText(url: string): Promise<PdfTextResult> {
     }
     return { ok: true, doc: await withFigureSizes(normalize(outline), download.bytes) };
   } catch (err) {
-    console.warn("[papers/pdf-text] read failed:", err);
+    console.warn("[papers/pdf-text] read failed:", err instanceof Error ? err.name : typeof err);
     return { ok: false, reason: String(err) };
   }
 }
@@ -390,7 +415,8 @@ export async function tryExtractPdfText(url: string): Promise<PdfTextResult> {
 export async function extractPdfTextFromBytes(bytes: Buffer): Promise<PdfTextResult> {
   try {
     // P12-83 (§1h.463): the capitals a font's own map reads as lowercase, repaired first (`case-repair.ts`).
-    const pages = withPageLigatures(withPageCase(await readPages(bytes)));
+    const { pages: rawPages, infoTitle } = await readPdf(bytes);
+    const pages = withPageLigatures(withPageCase(rawPages));
     // Page 1's lines as printed, joined with spaces, before any of them is set
     // aside as the cover. Read in the columns the outline reads them in (P7-10:
     // the paper's own gutter, for a first page too sparse to show one), so a
@@ -408,11 +434,11 @@ export async function extractPdfTextFromBytes(bytes: Buffer): Promise<PdfTextRes
     if (!outline.sections || outline.sections.length === 0) {
       return { ok: false, reason: outline.reason ?? "no-sections", page1Text: page1Text || undefined };
     }
-    return { ok: true, doc: await withFigureSizes(normalize(outline), bytes), page1Text: page1Text || undefined };
+    return { ok: true, doc: await withFigureSizes(normalize(outline), bytes), page1Text: page1Text || undefined, ...(infoTitle ? { infoTitle } : {}) };
   } catch (err) {
     // The file is not a PDF pdf.js can open. Not a scan: say it failed. The
     // error names the problem, never the text.
-    console.warn("[papers/pdf-text] read failed:", err);
+    console.warn("[papers/pdf-text] read failed:", err instanceof Error ? err.name : typeof err);
     return { ok: false, reason: String(err) };
   }
 }

@@ -15,6 +15,8 @@
 // for its original caller; it just has a second one now.
 import type { createAdminClient } from "@/lib/supabase/admin";
 import { sendDigestEmail } from "@/lib/email/send-digest";
+import { resolveSeedPool, validateSeedDigestSend, persistSeedDigestEmailAttempt } from "@/lib/seed-pool/server";
+import { seedOutputContext } from "@/lib/seed-pool/output";
 
 type AdminClient = ReturnType<typeof createAdminClient>;
 
@@ -77,6 +79,8 @@ export type ConflictOutcome =
 // byte-for-byte stored payload every time.
 export type ExistingBriefingRow = {
   id: number;
+  seed_pool_version?: string | null;
+  seed_revocation_generation?: number | null;
   payload: { email?: Partial<PendingDigestEmail> & { sent?: boolean } };
 };
 
@@ -93,16 +97,18 @@ export async function handleConflictingEmailClaim(params: {
     reason: "digest already claimed for this local date",
   };
 
+  const context = seedOutputContext(await resolveSeedPool(userId, { targetLocalDate: localDate, now }), localDate);
+  if (context.kind === "unavailable") return { kind: "skip", reason: "seed pool unavailable" };
   let existing: ExistingBriefingRow | null = null;
   try {
     const { data, error } = await admin
       .from("briefing_deliveries")
-      .select("id, payload")
+      .select(context.kind === "ready" ? "id, payload, seed_pool_version, seed_revocation_generation" : "id, payload")
       .eq("user_id", userId)
       .eq("local_date", localDate)
       .limit(1);
     if (!error && Array.isArray(data) && data.length > 0) {
-      existing = data[0] as ExistingBriefingRow;
+      existing = data[0] as unknown as ExistingBriefingRow;
     }
   } catch {
     existing = null;
@@ -124,6 +130,12 @@ export async function handleConflictingEmailClaim(params: {
     return { kind: "skip", reason: "digest email attempt expired unsent (>23h, not retried)" };
   }
 
+  if (context.kind === "ready") {
+    if ((existing.seed_pool_version ?? "none") !== context.version || (existing.seed_revocation_generation ?? 0) !== context.revocationGeneration) return { kind: "skip", reason: "seed pool changed" };
+    const allowed = await validateSeedDigestSend({ ownerId: userId, localDate, deliveryId: existing.id, expectedVersion: context.version, expectedRevocationGeneration: context.revocationGeneration });
+    if (allowed?.status !== "allowed") return { kind: "skip", reason: "seed pool changed" };
+  }
+
   const result = await sendDigestEmail({
     to: email.to,
     items: [],
@@ -133,10 +145,10 @@ export async function handleConflictingEmailClaim(params: {
   });
 
   if (result.sent) {
-    await persistDigestEmailAttempt(admin, existing.id, existing.payload, {
-      sent: true,
-      sentAt: new Date().toISOString(),
-    });
+    const confirmed = { sent: true as const, sentAt: new Date().toISOString() };
+    if (context.kind === "ready") {
+      await persistSeedDigestEmailAttempt({ ownerId: userId, localDate, deliveryId: existing.id, expectedVersion: context.version, expectedRevocationGeneration: context.revocationGeneration, email: confirmed });
+    } else await persistDigestEmailAttempt(admin, existing.id, existing.payload, confirmed);
     return { kind: "sent", messageId: result.messageId };
   }
   if (result.errorCode === "concurrent_idempotent_requests") {

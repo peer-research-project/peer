@@ -46,7 +46,7 @@ const paddingRem = Number(stuckTop?.[2]);
 const maxHeight = /max-height:\s*calc\(\(100vh\s*-\s*(\d+(?:\.\d+)?)rem\)\s*\/\s*var\(--page-zoom,\s*1\)\s*-\s*var\(--legend-h\)\s*-\s*(\d+(?:\.\d+)?)rem\);/.exec(PANE);
 const legend = rem(CSS, /--legend-h:\s*(\d+(?:\.\d+)?)rem;/, "the legend's height is a custom property in rem");
 /** The page's bottom room under the reader's grid, in rem: `md:pb-16` on the paper page's container. */
-const room = rem(PAGE, /\$\{PAGE_CLASS\}\s+md:pb-(\d+)\b/, "the paper page's container has a bottom padding from md") / 4;
+const room = rem(PAGE, /\$\{PAGE_CLASS\}[^`]*\bmd:pb-(\d+)\b/, "the paper page's container has a bottom padding from md") / 4;
 /**
  * The overhang (rem, local) the holder's end needs at Fit zoom `z`. The pane's foot, painted, is `100vh - (c - a) - z x (legend + d - b)` from the window's top
  * (a = the masthead, b = the article's padding, c = what max-height takes off the window, d = its clearance), so it stands `(c - a) / z + legend + d - b`

@@ -19,6 +19,7 @@ import { scoreSource } from "./source-weight";
 import { generateReason } from "./reason";
 import { shouldPushReviewPaper } from "./review-policy";
 import { normalizePhrase, tokenizeFolded } from "./tokenize";
+import { admitsBySeed, hasUsableSeed, mixSeedScore, seedBlendWeights, strongestSeedMatches, type MatchingSeed, type SeedMatch } from "@/lib/seed-pool/scoring";
 import { canonicalize, termSpecificity } from "./term-expand";
 import {
   buildPreferenceDocumentFrequency,
@@ -157,6 +158,7 @@ export function scoreItems(
   profile: ScoringProfile,
   weights: ScoreWeights = DEFAULT_WEIGHTS,
   now = Date.now(),
+  seedPapers: readonly MatchingSeed[] = [],
 ): ScoredItem[] {
   if (items.length === 0) return [];
   const w = normalizeWeights(weights);
@@ -180,6 +182,13 @@ export function scoreItems(
   // Clean + index the ledger once for the whole batch (was re-cleaned + scanned
   // per item before).
   const preparedLedger = prepareLedger(profile.preferenceLedger);
+  // Isolate explicit positive feedback from upload/question evidence: the
+  // seed branch blends it once, separately from intent and source/recency.
+  const positiveEntries = Object.entries(profile.preferenceLedger ?? {}).filter(([, entry]) => entry.positive > 0);
+  const explicitFeedback = positiveEntries.length > 0 ? prepareLedger(Object.fromEntries(
+    positiveEntries.map(([key, entry]) => [key, { ...entry, uploads: undefined, questions: undefined }]),
+  )) : undefined;
+  const seedEnabled = seedPapers.some(hasUsableSeed);
 
   const mustTopics = profile.topics;
   const selectedSenseConcepts = profile.selectedSenseConcepts ?? [];
@@ -214,10 +223,12 @@ export function scoreItems(
     kw: ReturnType<typeof scoreKeyword>;
     softKw: ReturnType<typeof scoreKeyword>;
     tf: number;
+    seedMatches: SeedMatch[];
   }[] = [];
   for (const item of items) {
     if (exclusions.some((term) => topicMatchesItem(item, term))) continue;
     if (profile.minPublishedAt && item.publishedAt < profile.minPublishedAt) continue;
+    const seedMatches = seedEnabled ? strongestSeedMatches([item.title, item.abstract ?? "", ...(item.tags ?? [])].join(" "), seedPapers) : [];
     let kw = scoreKeyword(item, literalMustTopics, {
       grounded: true,
       selectedSenseConcepts,
@@ -343,12 +354,13 @@ export function scoreItems(
     }
     // Required literals route/score candidate discovery. They cannot evict a
     // candidate already admitted by another declared retrieval channel.
-    if ((literalMustTopics.length > 0 || selectedSenseConcepts.length > 0) && kw.score === 0 && !admittedByNonLiteralChannel) continue;
+    if ((literalMustTopics.length > 0 || selectedSenseConcepts.length > 0) && kw.score === 0 && !admittedByNonLiteralChannel && !admitsBySeed(seedMatches[0])) continue;
     passed.push({
       item,
       kw,
       softKw: scoreKeyword(item, softTopics, { grounded: true }),
       tf: clamp01(scoreTfidf(item.id, pText, index)),
+      seedMatches,
     });
   }
 
@@ -359,7 +371,7 @@ export function scoreItems(
   const topicality = poolPercentile(passed.map((p) => p.tf));
 
   const scored: ScoredItem[] = [];
-  passed.forEach(({ item, kw, softKw, tf }, i) => {
+  passed.forEach(({ item, kw, softKw, tf, seedMatches }, i) => {
     const tp = topicality[i];
     const rc = clamp01(scoreRecency(item.publishedAt, now));
     const sr = clamp01(scoreSource(item.source, profile.sourceWeights));
@@ -390,9 +402,19 @@ export function scoreItems(
     // (Explore topics, the preference ledger) this item's Required-tag
     // demotion says nothing about.
     const senseContextPenalty = kw.fullyDemoted ? SENSE_CONTEXT_DEMOTED_GROUNDING : 1;
-    const combined = clamp01(
-      base * preference.penalty * senseContextPenalty + softBonus + preference.boost,
-    );
+    const explicit = explicitFeedback ? scorePreferenceMatch(item, explicitFeedback, mustTopics, {
+      now, documentFrequency: preferenceDocumentFrequency, corpusSize: items.length,
+    }) : null;
+    // R-C7: intent enters the seed blend on the same pool-relative scale
+    // (`tp`, the topicality percentile) the no-seed ranking uses, not the raw
+    // cosine `tf`, whose ceiling (~0.6) would quietly shrink intent's 35%.
+    const seedIntent = ((kw.score + tp) / 2) * senseContextPenalty;
+    const seedFeedback = explicit ? clamp01(explicit.boost / 0.18) : null;
+    const seedRecencySource = (rc + sr) / 2;
+    const blended = seedEnabled ? mixSeedScore(seedMatches[0]?.score ?? 0, seedIntent, seedFeedback, seedRecencySource) : 0;
+    const combined = seedEnabled
+      ? blended * preference.penalty
+      : clamp01(base * preference.penalty * senseContextPenalty + softBonus + preference.boost);
     const breakdown: ScoreBreakdown = {
       keyword: kw.score,
       tfidf: tf,
@@ -400,13 +422,27 @@ export function scoreItems(
       recency: rc,
       source: sr,
       combined,
+      ...(seedEnabled ? { seedBlend: {
+        seed: clamp01(seedMatches[0]?.score ?? 0),
+        intent: clamp01(seedIntent),
+        feedback: seedFeedback,
+        recencySource: clamp01(seedRecencySource),
+        weights: seedBlendWeights(seedFeedback),
+        blended,
+        preferencePenalty: preference.penalty,
+        seedFacets: [...new Set((seedMatches[0]?.hits ?? []).map((hit) => hit.facet))],
+      } } : {}),
     };
     scored.push({
       ...item,
       score: combined,
       scoreBreakdown: breakdown,
       matchedKeywords: kw.matched,
-      relevanceReason: generateReason(item, kw.matched, breakdown),
+      // R-C18: a seed reason only when that seed's match admits the item on
+      // its own; otherwise the ordinary reason, never a sub-bar seed claim.
+      relevanceReason: seedEnabled && admitsBySeed(seedMatches[0]) && seedMatches[0].reasonPhrases.length
+        ? `Shares ${seedMatches[0].reasonPhrases.join(" and ")} with a seed paper.`
+        : generateReason(item, kw.matched, breakdown),
     });
   });
 

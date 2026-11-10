@@ -19,15 +19,6 @@ export interface SourceQuery {
   avoid?: string[];
   timeWindow?: SearchBrief["timeWindow"];
   limit?: number;
-  /**
-   * The reader's own search key, when they sent one. Peer funds no search of
-   * its own: with no key here a web-search source returns nothing.
-   */
-  webSearch?: {
-    tavilyApiKey?: string;
-    includeDomains?: string[];
-    excludeDomains?: string[];
-  };
 }
 
 export interface RawItem {
@@ -42,6 +33,8 @@ export interface RawItem {
    * J. Simons +5" and could not say where any of them were.
    */
   leadAffiliation?: string;
+  /** OpenAlex institution ID for the first author, when available. */
+  leadInstitutionId?: string;
   abstract?: string;
   /** Semantic Scholar's machine-written one-liner. Never merged into `abstract`; shown labelled. */
   tldr?: string;
@@ -75,6 +68,7 @@ export interface RawItem {
    */
   admissionChannels?: FeedAdmissionChannel[];
   metadata: {
+    abstractRetrieval?: import("@/lib/papers/enrich").AbstractRetrieval;
     citationCount?: number;
     doi?: string;
     semanticScholarId?: string;

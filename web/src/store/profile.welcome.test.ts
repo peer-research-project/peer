@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { StateStorage } from "zustand/middleware";
 import { defaultProfile } from "@/types";
+import { hasBeenSetUp, walkthroughAction } from "@/lib/profile/first-visit";
 import { useProfileStore } from "./profile";
 
 // P7-16 (R12): `welcomeSkipped` is the persisted flag behind "the walkthrough
@@ -44,6 +45,52 @@ describe("profile.welcomeSkipped — the flag", () => {
   });
 });
 
+// W27 (R-ONB-1 rule 3, 2026-11-06): the owner's report — "when an existing
+// account logged in, the user should not be asked to walkthrough the beginning
+// walkthrough process again". A confirmed sign-out runs `logOut()`, which used
+// to reset the profile to defaults including this device flag, so the very
+// next `/` (the sign-out's own redirect) read "never set up" and FirstRunGate
+// sent the reader into the walkthrough. The flag is a device fact, never
+// synced, not account data: it survives; everything else still resets.
+describe("profile.welcomeSkipped — survives sign-out (W27, R-ONB-1 rule 3)", () => {
+  beforeEach(() => {
+    useProfileStore.setState({ profile: { ...defaultProfile }, lastSynced: null, syncedAccountId: null });
+  });
+
+  it("(d) a reader who met the walkthrough, signs out and opens / is not sent back to it", () => {
+    useProfileStore.getState().updateTopics(["battery materials"]);
+    useProfileStore.getState().completeOnboarding();
+    useProfileStore.getState().setSyncedAccountId("user-returning");
+    useProfileStore.getState().logOut();
+    const { profile } = useProfileStore.getState();
+    expect(profile.welcomeSkipped).toBe(true);
+    expect(hasBeenSetUp(profile)).toBe(true);
+    expect(walkthroughAction("/", profile)).toBeNull();
+  });
+
+  it("everything else still resets: the profile is the default one plus the flag, with no owner and no baseline", () => {
+    useProfileStore.getState().updateTopics(["battery materials"]);
+    useProfileStore.getState().updateCurrentProject("A study of solid electrolytes");
+    useProfileStore.getState().completeOnboarding();
+    useProfileStore.getState().setSyncedAccountId("user-returning");
+    useProfileStore.getState().setLastSynced({ researchTopics: ["battery materials"] });
+    useProfileStore.getState().logOut();
+    const state = useProfileStore.getState();
+    expect(state.profile).toEqual({ ...defaultProfile, welcomeSkipped: true });
+    expect(state.profile.onboardedAt).toBeNull();
+    expect(state.lastSynced).toBeNull();
+    expect(state.syncedAccountId).toBeNull();
+  });
+
+  it("a browser that never met the walkthrough is not given the flag by a sign-out (P7-16 stays true for it)", () => {
+    useProfileStore.getState().logOut();
+    const { profile } = useProfileStore.getState();
+    expect(profile).toEqual(defaultProfile);
+    expect("welcomeSkipped" in profile).toBe(false);
+    expect(walkthroughAction("/", profile)).toBe("redirect");
+  });
+});
+
 describe("profile.welcomeSkipped — storage", () => {
   async function rehydrateFrom(profile: Record<string, unknown>, version = 7) {
     let stored = JSON.stringify({ state: { profile, lastSynced: null, syncedAccountId: null }, version });
@@ -75,9 +122,9 @@ describe("profile.welcomeSkipped — storage", () => {
   it("the flag is written to the stored profile and survives a reload, with no version change", async () => {
     const { mod, read } = await rehydrateFrom({ ...defaultProfile });
     mod.useProfileStore.getState().skipWelcome();
-    // The store's current version (8 since the events/jobs fields were dropped, P9-32):
-    // setting the flag itself does not move it.
-    expect(read().version).toBe(8);
+    // The store's current version (9 since the Tavily fields were dropped; 8 was
+    // the events/jobs fields, P9-32): setting the flag itself does not move it.
+    expect(read().version).toBe(9);
     expect(read().state.profile.welcomeSkipped).toBe(true);
 
     const again = await rehydrateFrom(read().state.profile);

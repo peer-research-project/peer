@@ -38,13 +38,11 @@ export function isAggregatorHost(url: string): boolean {
 }
 
 /**
- * Classifies a hard-access HTTP status against the URL it came from.
- * Returns `null` when `status` isn't one of the four hard-access codes at
- * all — callers keep their own existing handling for every other status
- * unchanged. Otherwise: `"blocked"` on an aggregator host (never a
- * subscription), `"paywalled"` everywhere else (a real publisher gate).
+ * Classifies hard-access statuses without inferring subscription from a
+ * refusal: 401, 403 and 451 are blocked; 402 may indicate payment on a
+ * non-aggregator. Other status codes return null.
  */
 export function classifyHardAccessStatus(url: string, status: number): HardAccessVerdict {
   if (!HARD_ACCESS_STATUS_CODES.includes(status)) return null;
-  return isAggregatorHost(url) ? "blocked" : "paywalled";
+  return status === 402 && !isAggregatorHost(url) ? "paywalled" : "blocked";
 }

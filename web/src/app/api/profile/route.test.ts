@@ -71,6 +71,16 @@ const rowFixture = {
   color_theme: "system:ember" as const,
   updated_at: "2026-07-31T00:00:00.000Z",
 };
+
+describe("student career stages", () => {
+  it("preserves undergraduate and master's stages through profile storage", () => {
+    for (const careerStage of ["Undergraduate", "Master's student"] as const) {
+      const row = profilePatchToRow({ careerStage }, "user-1");
+      expect(row.career_stage).toBe(careerStage);
+      expect(profileRowToProfile({ ...rowFixture, career_stage: careerStage }).careerStage).toBe(careerStage);
+    }
+  });
+});
 const explicitEmptyIntent = {
   version: "feed-intent-v1" as const,
   project: { presence: "explicit-empty" as const }, challenge: { presence: "omitted" as const },
@@ -661,5 +671,89 @@ describe("GOOGLE-SIGNIN — PUT /api/profile derives user_id only from the sessi
     expect(written.user_id).toBe("user-1");
     expect(written.display_name).toBe("Ada");
     expect(Object.keys(written)).not.toContain("provider");
+  });
+});
+
+// W8 R-H1 (check 7): every answer about one owner (or about the absence of
+// one) must tell any shared cache not to keep it — the 401s and error
+// answers included, not only the 200s.
+describe("W8 R-H1: every /api/profile response is private, no-store", () => {
+  const putRequest = (body: unknown) =>
+    new NextRequest("http://peer.test/api/profile", { method: "PUT", body: JSON.stringify(body) });
+  const upsertReturning = (result: { data: unknown; error: unknown }) =>
+    vi.fn(() => ({ select: () => ({ single: async () => result }) }));
+  const expectPrivate = (response: Response) =>
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.getUser.mockResolvedValue(signedIn("user-w8"));
+    mocks.maybeSingle.mockResolvedValue({ data: null, error: null });
+  });
+
+  it("GET 401 for a signed-out visitor", async () => {
+    mocks.getUser.mockResolvedValue(signedOut());
+    const response = await GET();
+    expect(response.status).toBe(401);
+    expectPrivate(response);
+  });
+
+  it("GET 500 when the profile read fails", async () => {
+    mocks.maybeSingle.mockResolvedValue({ data: null, error: { message: "invented read failure" } });
+    const response = await GET();
+    expect(response.status).toBe(500);
+    expectPrivate(response);
+  });
+
+  it("GET 500 when the stored feed intent is malformed", async () => {
+    mocks.maybeSingle.mockResolvedValue({ data: { ...rowFixture, feed_intent: { version: "not-v1" } }, error: null });
+    const response = await GET();
+    expect(response.status).toBe(500);
+    expectPrivate(response);
+  });
+
+  it("GET 200 with a profile", async () => {
+    mocks.maybeSingle.mockResolvedValue({ data: rowFixture, error: null });
+    const response = await GET();
+    expect(response.status).toBe(200);
+    expectPrivate(response);
+  });
+
+  it("PUT 401 for a signed-out visitor", async () => {
+    mocks.createClient.mockResolvedValueOnce({ auth: { getUser: async () => signedOut() }, from: () => ({}) });
+    const response = await PUT(putRequest({ displayName: "Invented Name" }));
+    expect(response.status).toBe(401);
+    expectPrivate(response);
+  });
+
+  it("PUT 400 for an invalid feed intent", async () => {
+    mocks.createClient.mockResolvedValueOnce({ auth: { getUser: async () => signedIn("user-w8") }, from: () => ({ upsert: vi.fn() }) });
+    const response = await PUT(putRequest({ feedIntent: { version: "not-v1" } }));
+    expect(response.status).toBe(400);
+    expectPrivate(response);
+  });
+
+  it("PUT 500 when the upsert fails", async () => {
+    const upsert = upsertReturning({ data: null, error: { message: "invented write failure" } });
+    mocks.createClient.mockResolvedValueOnce({ auth: { getUser: async () => signedIn("user-w8") }, from: () => ({ upsert }) });
+    const response = await PUT(putRequest({ displayName: "Invented Name" }));
+    expect(response.status).toBe(500);
+    expectPrivate(response);
+  });
+
+  it("PUT 500 when the written row maps to a malformed feed intent", async () => {
+    const upsert = upsertReturning({ data: { ...rowFixture, feed_intent: { version: "not-v1" } }, error: null });
+    mocks.createClient.mockResolvedValueOnce({ auth: { getUser: async () => signedIn("user-w8") }, from: () => ({ upsert }) });
+    const response = await PUT(putRequest({ displayName: "Invented Name" }));
+    expect(response.status).toBe(500);
+    expectPrivate(response);
+  });
+
+  it("PUT 200 on a saved profile", async () => {
+    const upsert = upsertReturning({ data: rowFixture, error: null });
+    mocks.createClient.mockResolvedValueOnce({ auth: { getUser: async () => signedIn("user-w8") }, from: () => ({ upsert }) });
+    const response = await PUT(putRequest({ displayName: "Invented Name" }));
+    expect(response.status).toBe(200);
+    expectPrivate(response);
   });
 });

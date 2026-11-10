@@ -33,6 +33,11 @@ export interface AnchorSection {
   readonly figures?: readonly AnchorFigure[];
 }
 
+/** An empty or whitespace-only reading cannot prove a passage disappeared. */
+export function hasReadableAnchorBody(body: readonly AnchorSection[]): boolean {
+  return body.some((section) => section.paragraphs.some((paragraph) => paragraph.trim().length > 0));
+}
+
 export interface AnchorBlock {
   kind: AnchorBlockKind;
   text: string;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ExtractedDocument } from "@/lib/papers/html-text";
-import { extractUploadConcepts, matchUploadedPaper, UPLOAD_CONCEPT_EXTRACTION_VERSION } from "./upload-concepts";
+import { extractUploadConcepts, holdsVerb, KNOWN_PARTICIPLE_TERMS, matchUploadedPaper, PHRASE_BOUNDARY_WORDS, UPLOAD_CONCEPT_EXTRACTION_VERSION } from "./upload-concepts";
 import { applyUploadPreferenceSignal, applyPreferenceSignal, cleanPreferenceLedger, removeUploadPreferenceSignal, summarizePreferenceLedger, scorePreferenceMatch, prepareLedger } from "./ledger";
 import { compileSearchBrief } from "@/lib/feed/profile-compiler";
 import { derivePoolCacheKey } from "@/lib/opportunities/pool-cache";
@@ -238,5 +238,142 @@ describe("the extraction version after a cut sentence is joined across a page br
   // line opens with a capital (round 4's X-A9); 13 retires it. A saved note keeps its passage by its quote (P10-35).
   it("is past the reading that cut a sentence at a capital after a page break or a figure", () => {
     expect(UPLOAD_CONCEPT_EXTRACTION_VERSION).toBeGreaterThanOrEqual(13);
+  });
+});
+
+// R-P1 (W9, 2026-11-04): seed reasons named phrases that end on a verb or a
+// function word ("electrolyte concentration affects", "canopy density
+// affects", "affects cycling stability"). Invented text, shaped like the
+// fictional hosted fixtures.
+describe("R-P1 phrases never start or end on a verb-like or function word", () => {
+  const BOUNDARY = new Set("affects affect affected using used shows show is are was were of for with and the a an to in on after under than how".split(" "));
+  const edge = (label: string) => { const t = label.split(" "); return BOUNDARY.has(t[0]) || BOUNDARY.has(t[t.length - 1]); };
+  const batteryDoc: ExtractedDocument = {
+    title: "", source: "pdf", figureCaptions: [],
+    sections: [{ id: "s0", heading: "Body", canonical: "body", text: ("This invented paper studies electrolyte stability in fictional cells. The question is how electrolyte concentration affects cycling stability. " +
+      "Discharge affects suspended load in an invented channel. We measured cell capacity using electrochemical cycling. ").repeat(4) }],
+  };
+  const canopyDoc: ExtractedDocument = {
+    title: "", source: "pdf", figureCaptions: [],
+    sections: [{ id: "s0", heading: "Body", canonical: "body", text: "The question is how canopy density affects water retention after rain in fictional trees. Canopy moisture was logged. ".repeat(4) }],
+  };
+
+  it("trims boundary verbs and function words, keeping the phrase they wrapped", () => {
+    const battery = extractUploadConcepts(batteryDoc).map((c) => c.label);
+    const canopy = extractUploadConcepts(canopyDoc).map((c) => c.label);
+    for (const label of [...battery, ...canopy]) expect(edge(label), label).toBe(false);
+    expect(battery).toEqual(expect.arrayContaining(["electrolyte concentration", "cycling stability", "suspended load"]));
+    expect(battery).not.toEqual(expect.arrayContaining(["electrolyte concentration affects"]));
+    expect(canopy).toEqual(expect.arrayContaining(["canopy density", "water retention"]));
+  });
+  it("drops a phrase whose trimmed rest is below the minimum, and lists each trimmed phrase once", () => {
+    const doc: ExtractedDocument = { title: "", source: "pdf", figureCaptions: [], sections: [{ id: "s0", heading: "Body", canonical: "body", text: "Density affects. Retention after. Glacier meltwater affects glacier meltwater. ".repeat(3) }] };
+    const labels = extractUploadConcepts(doc).map((c) => c.label);
+    expect(labels).not.toContain("density");
+    expect(labels).not.toContain("retention");
+    expect(labels.filter((label) => label === "glacier meltwater")).toHaveLength(1);
+    for (const label of labels) expect(edge(label), label).toBe(false);
+  });
+});
+
+// W11 R-C3 (Round-1 scorecard C3): object/method recognition is not
+// materials-science-only. Invented sentences from five other fields; each
+// names its method, so at least one phrase per text must come out as a
+// "method" facet (rule-based cues only — no model, no taxonomy lookup).
+describe("R-C3 method recognition beyond materials science", () => {
+  const body = (text: string): ExtractedDocument => ({
+    title: "", source: "pdf", figureCaptions: [],
+    sections: [{ id: "s0", heading: "Body", canonical: "body", text: `${text} `.repeat(2) }],
+  });
+  const cases: [string, string[]][] = [
+    ["We measured turbidity with acoustic doppler profilers and sediment traps.", ["acoustic doppler profilers"]],
+    ["We measured bleaching using underwater photogrammetry and temperature loggers.", ["underwater photogrammetry", "temperature loggers"]],
+    ["We measured queue length using loop detectors and microsimulation.", ["loop detectors"]],
+    ["We measured nitrate flux using isotope tracing and gas chromatography.", ["isotope tracing", "gas chromatography"]],
+    ["We measured leaf area and canopy moisture using optical imaging and field sensors.", ["optical imaging", "field sensors"]],
+  ];
+
+  for (const [sentence, methods] of cases) {
+    it(`recognizes the method in "${sentence}"`, () => {
+      const concepts = extractUploadConcepts(body(sentence));
+      const methodLabels = concepts.filter((c) => c.facet === "method").map((c) => c.label);
+      expect(methodLabels.length, sentence).toBeGreaterThan(0);
+      expect(methodLabels).toEqual(expect.arrayContaining(methods));
+    });
+  }
+
+  it("keeps what was measured out of the method facet", () => {
+    const facet = (sentence: string, label: string) => extractUploadConcepts(body(sentence)).find((c) => c.label === label)?.facet;
+    expect(facet(cases[2][0], "queue length")).toBe("topic");
+    expect(facet(cases[4][0], "leaf area")).toBe("topic");
+    expect(facet(cases[4][0], "canopy moisture")).toBe("topic");
+    // An object cue: the thing the method was applied to, not the method.
+    expect(facet(cases[0][0], "sediment traps")).toBe("material");
+    expect(facet(cases[3][0], "nitrate flux")).toBe("material");
+  });
+
+  it("did not bump the extraction version itself (manager ruling: cue lists only); R-C3b took it past 14", () => {
+    expect(UPLOAD_CONCEPT_EXTRACTION_VERSION).toBeGreaterThan(14);
+  });
+});
+
+// W20 R-C3b (Round-2 scorecard C3): R-P1 trims only a phrase's edges, so the
+// Profile seed card still printed topics with a verb inside ("density affects
+// water", "denser foliage retained", "concentration maintained capacity").
+// No facet label may hold a verb anywhere; the noun-phrase pieces around it
+// stay, and a known term whose later word only looks like a participle is
+// kept. Invented text shaped like the fictional hosted fixtures.
+describe("R-C3b no facet label holds a verb (W20)", () => {
+  // Independent of the module: the R-P1/R-C18 list, and a past participle after the first word.
+  const LISTED = new Set("affects affect affected after reduces maintains retains".split(" "));
+  const verbInside = (label: string) => label.split(" ").some((word, i) => LISTED.has(word) || (i > 0 && /^[a-z]{3,}[^e]ed$/.test(word)));
+  const body = (text: string): ExtractedDocument => ({ title: "", source: "pdf", figureCaptions: [], sections: [{ id: "s0", heading: "Body", canonical: "body", text: `${text} `.repeat(4) }] });
+  const canopy = body("The question is how leaf canopy density affects water retention after rain. In this example denser foliage retained water for longer.");
+  const battery = body("The question is how electrolyte concentration affects cycling stability. In this example one concentration maintained capacity for more cycles. Grazing pressure reduces plant cover.");
+
+  it("drops every phrase with a verb inside and keeps the noun phrases around it", () => {
+    const labels = [...extractUploadConcepts(canopy), ...extractUploadConcepts(battery)].map((c) => c.label);
+    for (const label of labels) expect(verbInside(label), label).toBe(false);
+    for (const fragment of ["density affects water", "denser foliage retained", "foliage retained water", "retention after rain",
+      "concentration affects cycling", "concentration maintained capacity", "pressure reduces plant"]) expect(labels).not.toContain(fragment);
+    expect(labels).toEqual(expect.arrayContaining(["leaf canopy density", "water retention", "electrolyte concentration", "cycling stability", "grazing pressure", "plant cover"]));
+  });
+
+  it("never invents a word: every label is a run of words from the text", () => {
+    for (const doc of [canopy, battery]) {
+      const text = ` ${doc.sections[0].text.toLowerCase().replace(/[^a-z\s]/g, " ").replace(/\s+/g, " ")} `;
+      for (const { label } of extractUploadConcepts(doc)) expect(text.includes(` ${label} `), label).toBe(true);
+    }
+  });
+
+  it("keeps known terms and adjective participles", () => {
+    const labels = [
+      ...extractUploadConcepts(body("Machine learning and deep learning. Remote sensing of the boundary layer. Layered oxide cathodes.")),
+      ...extractUploadConcepts(body("Time resolved spectroscopy of nitrogen doped graphene. Highly ordered pyrolytic graphite. Near infrared spectra.")),
+    ].map((c) => c.label);
+    expect(labels).toEqual(expect.arrayContaining(["machine learning", "deep learning", "remote sensing", "boundary layer", "layered oxide cathodes",
+      "time resolved spectroscopy", "nitrogen doped graphene", "highly ordered pyrolytic", "near infrared spectra"]));
+  });
+
+  it("judges a phrase the same way the extractor does", () => {
+    for (const label of ["density affects water", "denser foliage retained", "concentration maintained capacity", "retention after rain", "pressure reduces plant"]) expect(holdsVerb(label), label).toBe(true);
+    for (const label of ["machine learning", "remote sensing data", "boundary layer", "time resolved spectroscopy", "surface enhanced raman", "nitrogen-doped graphene",
+      "near infrared spectra", "doped cathode", "maintained capacity", "particle speed", "electrochemical cycling"]) expect(holdsVerb(label), label).toBe(false);
+    for (const term of KNOWN_PARTICIPLE_TERMS) expect(holdsVerb(term), term).toBe(false);
+    for (const word of PHRASE_BOUNDARY_WORDS) expect(holdsVerb(`canopy ${word} water`), word).toBe(true);
+  });
+});
+
+// W20 R-C3b ruling 2: the cached reading of an upload is keyed by this
+// number, and a reading kept under 14 was made by the extractor whose
+// concepts still held verbs. 15 retires it: the next open is a cache miss
+// that reads the stored PDF again (nothing is deleted).
+describe("the extraction version after verb-holding phrases left the facets (R-C3b)", () => {
+  it("is 16", () => {
+    expect(UPLOAD_CONCEPT_EXTRACTION_VERSION).toBe(16);
+  });
+
+  it("stamps 16 on every concept it extracts", () => {
+    expect(extractUploadConcepts(doc).every((c) => c.extractionVersion === 16)).toBe(true);
   });
 });

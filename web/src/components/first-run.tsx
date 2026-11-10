@@ -24,11 +24,11 @@
 // so this works for signed-out visitors too and resets cleanly when
 // localStorage is cleared.
 
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useProfileStore } from "@/store/profile";
-import { useSyncGate } from "@/components/profile-sync";
-import { walkthroughAction } from "@/lib/profile/first-visit";
+import { clearReturningAccount, useSyncGate } from "@/components/profile-sync";
+import { RETURNING_ACCOUNT_DESTINATION, walkthroughAction } from "@/lib/profile/first-visit";
 // P4-S5b-FIX3 — the literal 4000 below is now sourced from here so it can't
 // silently drift from page.tsx's own auth-outcome fallback, which waits on
 // the same underlying ProfileSync state. The value and this hook's own
@@ -107,6 +107,34 @@ export function FirstRunGate() {
     skipWelcome();
     if (action === "redirect") router.replace("/welcome");
   }, [action, router, skipWelcome]);
+
+  // W27 (R-ONB-1 rule 1) — an account that was already set up never has to
+  // go through the walkthrough again after signing in. ProfileSync raises
+  // `returningAccount` at the sign-in pull (see `isReturningAccountSignIn`).
+  // On /welcome — where the walkthrough's own sign-in buttons come back to —
+  // the onboarding stamp is written and the reader leaves for `/` with
+  // replace, once (the wizard holds a blank layout meanwhile). The signal is
+  // cleared once the reader is on any other page, the landing included, so a
+  // later visit to /welcome of their own ("Set up Peer", "Replay walkthrough")
+  // opens normally. Not gated on `settled`: the pull itself is the evidence.
+  const returningAccount = useSyncGate((s) => s.returningAccount);
+  const leftWelcomeRef = useRef(false);
+
+  useEffect(() => {
+    if (!returningAccount || !pathname) {
+      leftWelcomeRef.current = false;
+      return;
+    }
+    if (pathname === "/welcome") {
+      if (leftWelcomeRef.current) return;
+      leftWelcomeRef.current = true;
+      completeOnboarding();
+      router.replace(RETURNING_ACCOUNT_DESTINATION);
+      return;
+    }
+    if (!onboardedAt) completeOnboarding();
+    clearReturningAccount();
+  }, [returningAccount, pathname, onboardedAt, router, completeOnboarding]);
 
   return null;
 }

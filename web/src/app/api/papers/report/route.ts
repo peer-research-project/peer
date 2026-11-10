@@ -117,6 +117,9 @@ function buildShallowPrompt(body: ExtendedRequest): string {
   const project = projectText(body);
   const evidenceRule =
     "one sentence copied character-for-character from the abstract that supports `text`";
+  // R-BYOK-2: a novelty line is kept only on a sentence that states it.
+  const noveltyEvidenceRule =
+    "one sentence copied character-for-character from the abstract that itself states this novelty or the comparison with prior work";
 
   const relationSchema = project
     ? {
@@ -149,7 +152,7 @@ function buildShallowPrompt(body: ExtendedRequest): string {
   return JSON.stringify({
     task: isReview
       ? "Create a structured Peer paper report for a REVIEW or SURVEY from the paper's title and abstract. Every claim item carries an `evidence` sentence copied character-for-character from the abstract; omit any item you cannot support that way. Do not invent numbers."
-      : "Create a structured Peer paper report from the paper's title and abstract. Every claim item carries an `evidence` sentence copied character-for-character from the abstract; omit any item you cannot support that way. Every key result also carries a `novelty` line saying what is new about it compared to prior work. Do not invent numbers.",
+      : "Create a structured Peer paper report from the paper's title and abstract. Every claim item carries an `evidence` sentence copied character-for-character from the abstract; omit any item you cannot support that way. A key result carries a `novelty` line only when a sentence of the abstract itself states what is new about it or how it compares with prior work, and that sentence is its `noveltyEvidence`. Do not invent numbers.",
     userContext: contextHint || "",
     ...(project ? { readerProject: project } : {}),
     paper: {
@@ -176,7 +179,10 @@ function buildShallowPrompt(body: ExtendedRequest): string {
           },
         ],
         newHere: [
-          "a short 'new here' line — the novelty, stated only where it differs from `summary`, as the abstract states it; omit entirely if there is nothing to add beyond the summary (max 2 items)",
+          {
+            text: "a short 'new here' line — the novelty as the abstract states it, only where it differs from `summary` (max 2 items; omit entirely when the abstract states no novelty and no comparison with prior work)",
+            evidence: noveltyEvidenceRule,
+          },
         ],
       },
       resultsAndSignificance: {
@@ -186,7 +192,8 @@ function buildShallowPrompt(body: ExtendedRequest): string {
             title: "short result label",
             detail: "one concrete result sentence grounded in the abstract",
             evidence: evidenceRule,
-            novelty: "one sentence saying what specifically is new about this result compared to prior work",
+            novelty: "one sentence saying what specifically is new about this result compared to prior work — only when the abstract states it; omit the key otherwise",
+            noveltyEvidence: noveltyEvidenceRule,
           },
         ],
       },
@@ -197,7 +204,7 @@ function buildShallowPrompt(body: ExtendedRequest): string {
       "Return ONLY valid JSON.",
       "`evidence` is one sentence copied character-for-character from the abstract. Do not paraphrase it, shorten it, or merge sentences.",
       "Omit any claim item you cannot support with such a sentence. An empty array is correct when nothing qualifies.",
-      "`newHere` (proposal) and `novelty` (per result) are Peer's reading and carry no evidence sentence; keep them specific to this abstract, never generic.",
+      "Each `newHere` item's `evidence` and each result's `noveltyEvidence` is one sentence copied character-for-character from the abstract that itself states the novelty or the comparison with prior work (for example 'Unlike prior work, we ...', 'for the first time', 'outperforms existing methods'). A sentence that only describes the method, the data or the result does not qualify: then omit that `newHere` item or the `novelty` key. Never infer a novelty the abstract does not state.",
       "Do not repeat a sentence from `summary` inside `newHere`; if the novelty is not separable from the summary, leave `newHere` empty.",
       "No sentence in `summary` or `newHere` exceeds about 25 words; use plain, high-school-reading-level wording.",
       "Produce no limitations and no next step.",
@@ -212,7 +219,7 @@ const SHALLOW_SYSTEM = [
   "You are Peer, a careful research assistant.",
   "Write concise paper reports for researchers from the title and abstract alone.",
   "Every claim carries an `evidence` sentence copied character-for-character from the abstract; a claim without one is omitted.",
-  "Keep proposal, method and novelty separate: proposal says what the paper tries to do; methods say what experiments or evaluations the abstract states were used; novelty says what is new against prior work.",
+  "Keep proposal, method and novelty separate: proposal says what the paper tries to do; methods say what experiments or evaluations the abstract states were used; novelty says what is new against prior work, only where the abstract itself states it.",
   "Do not fabricate experimental values, claims, or figures.",
   "Return only valid JSON.",
 ].join(" ");
@@ -227,6 +234,7 @@ async function generateShallowReport(
   body: ExtendedRequest,
   override: ProviderOverrideConfig | undefined,
 ): Promise<PaperReport> {
+  if (!fullAbstract(body.paper).trim()) return emptyReport("fallback");
   const provider = resolveProvider(override ?? null);
   if (!provider?.generateJsonText) return emptyReport("fallback");
   try {
@@ -459,7 +467,7 @@ function streamReport(
             ...shallow,
             paywallNotice:
               fullText.reason ??
-              "Peer could not find a legal full-text source for this paper. Showing an abstract-only report instead.",
+              (shallow.noLlm ? "Peer could not find a readable full-text source or generate a report." : "Peer could not find a legal full-text source for this paper. Showing an abstract-only report instead."),
           });
           return;
         }
@@ -499,7 +507,7 @@ function streamReport(
           finish({
             ...shallow,
             paywallNotice:
-              "Peer downloaded the paper but the deep-read step failed. Showing an abstract-only report instead.",
+              (shallow.noLlm ? "Peer downloaded the paper but the deep-read step failed; no report was generated." : "Peer downloaded the paper but the deep-read step failed. Showing an abstract-only report instead."),
           });
           return;
         }
@@ -657,7 +665,7 @@ async function handlePost(req: NextRequest) {
           ...shallow,
           paywallNotice:
             fullText.reason ??
-            "Peer could not find a legal full-text source for this paper. Showing an abstract-only report instead.",
+            (shallow.noLlm ? "Peer could not find a readable full-text source or generate a report." : "Peer could not find a legal full-text source for this paper. Showing an abstract-only report instead."),
         });
       }
 
@@ -690,7 +698,7 @@ async function handlePost(req: NextRequest) {
         return NextResponse.json({
           ...shallow,
           paywallNotice:
-            "Peer downloaded the paper but the deep-read step failed. Showing an abstract-only report instead.",
+            (shallow.noLlm ? "Peer downloaded the paper but the deep-read step failed; no report was generated." : "Peer downloaded the paper but the deep-read step failed. Showing an abstract-only report instead."),
         });
       }
 

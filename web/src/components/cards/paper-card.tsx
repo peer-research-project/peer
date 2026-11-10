@@ -7,7 +7,7 @@ import { useFeedStore } from "@/store/feed";
 import { Tag, Relevance, ActionBar } from "@/components/ui";
 import { reviewPaperLabel } from "@/lib/papers/report";
 import { cardShell } from "@/components/ui/card-shell";
-import { buildReadingKey } from "@/components/reader/use-reading";
+import { buildReadingKey, fingerprintReadingSource, READING_CACHE_KEY, READING_CACHE_TTL_MS, READING_VERSION } from "@/components/reader/use-reading";
 
 const WORDS_PER_MINUTE = 220;
 /** The summary's own length — what the card said before it knew the paper's body. */
@@ -24,15 +24,14 @@ function summaryMinutes(p: Paper): number {
 /**
  * P10-11 rule 5 (two blind readers costed an uploaded 50-minute paper at 0.5): the card's minutes are the paper's
  * when its body is known — `map.totalMinutes` of the reading the reading page keeps in this browser
- * (`use-reading.ts`: localStorage `peer-reading-v2`, keyed by `buildReadingKey`, the same number the map's header
+ * (`use-reading.ts`: current source-keyed localStorage cache, the same number the map's header
  * shows) — and the summary's words otherwise. Read from the browser's own storage: the card never fetches.
  */
 export function cardMinutes(p: Paper, bodyMinutes: number | null): number {
   return bodyMinutes !== null && bodyMinutes > 0 ? bodyMinutes : summaryMinutes(p);
 }
 
-const READING_CACHE_KEY = "peer-reading-v2";
-type StoredReadings = Record<string, { reading?: { map?: { totalMinutes?: unknown } } } | undefined>;
+type StoredReadings = Record<string, { ts?: number; reading?: { version?: number; sourceFingerprint?: string; map?: { totalMinutes?: unknown } } } | undefined>;
 
 // The whole cache is parsed once per change of its text, not once per card per render.
 let parsedFrom: string | null = null;
@@ -51,11 +50,14 @@ function storedReadings(raw: string | null): StoredReadings {
 }
 
 /** The map's total for a paper whose reading is in this browser's cache; null when it is not (or storage is unreadable). */
-export function bodyMinutesOf(p: Pick<Paper, "id" | "fullTextUploadId" | "revision">, storage?: Pick<Storage, "getItem">): number | null {
+export function bodyMinutesOf(p: Pick<Paper, "id" | "fullTextUploadId" | "revision" | "summaryIntro" | "summaryResultDiscussion">, storage?: Pick<Storage, "getItem">): number | null {
   try {
     const store = storage ?? (typeof window === "undefined" ? undefined : window.localStorage);
     if (!store) return null;
-    const total = storedReadings(store.getItem(READING_CACHE_KEY))[buildReadingKey(p.id, p.fullTextUploadId, p.revision)]?.reading?.map?.totalMinutes;
+    const fingerprint = fingerprintReadingSource(p);
+    const entry = storedReadings(store.getItem(READING_CACHE_KEY))[buildReadingKey(p.id, p.fullTextUploadId, p.revision, fingerprint)];
+    if (entry?.reading?.version !== READING_VERSION || entry.reading.sourceFingerprint !== fingerprint || typeof entry.ts !== "number" || !Number.isFinite(entry.ts) || Date.now() - entry.ts >= READING_CACHE_TTL_MS) return null;
+    const total = entry.reading.map?.totalMinutes;
     return typeof total === "number" && Number.isFinite(total) && total > 0 ? total : null;
   } catch {
     return null;

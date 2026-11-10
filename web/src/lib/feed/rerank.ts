@@ -139,6 +139,16 @@ function firstAuthorKey(item: ScoredItem): string | null {
   return first && first.length > 0 ? first : null;
 }
 
+/**
+ * R-C6b: the per-author/per-topic cap on its own, without Tier 1's local
+ * score boosts, for the seed-pool path. A seeded user keeps the same
+ * diversity constraint the no-seed path applies, but the seed blend stays the
+ * only score (no second, hidden seed weight).
+ */
+export function applyDiversityCap(items: ScoredItem[], brief: SearchBrief): ScoredItem[] {
+  return diversify(items, brief);
+}
+
 function diversify(items: ScoredItem[], brief: SearchBrief): ScoredItem[] {
   const maxPerTopic = brief.controls.discoveryMode === "core" ? 4 : 3;
   const seenTopic = new Map<string, number>();

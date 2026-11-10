@@ -40,22 +40,17 @@
 // What it does is the band's old `open()` (`paper-notes.tsx`): the paper's own notes, made the
 // first time with the paper's title and your sticky notes (P10-09e: nothing else is placed in it).
 //
-// P10-09b (the owner's review 7.2): on the reading page the edge tab opens those notes as a floating window at
-// the right (`notes-window.tsx`) instead of navigating, and while the window stands the tab stands beside it
-// (360 px in), a second press closing it. The phone's row, and (P12-77) its edge tab, navigate to the notes page.
-
+// Desktop and mobile open the note on its own page.
 import { useEffect, useState } from "react";
 import type { CSSProperties } from "react";
 import type { Paper } from "@/types";
 import type { QuestionAnswers } from "@/lib/papers/report";
-import { buttonVariants } from "@/components/ui/button";
-import { COMMAND } from "@/components/ui/command";
+import { IconBook } from "@/components/icons";
 import { cn } from "@/lib/cn";
 import { legendHeightPx } from "@/components/reader/explain-dock";
 import { DIVIDER_PX } from "@/components/reader/pane-layout";
 import { readPageZoom, useMarginRect } from "@/lib/reader/margin";
 import { useWindows } from "@/lib/reader/windows";
-import { NotesWindow } from "./notes-window";
 import { usePaperNotes } from "./paper-notes";
 
 /** "Notes" until the paper has a note of its own; then it says what a press does. */
@@ -181,7 +176,6 @@ const EDGE_TAB_BAND = "[--tab-band:var(--tab-band-top,100vh)] [--tab-floor:0px] 
 export function NotesButtonView({
   variant,
   has,
-  shown = false,
   beside = false,
   marginLeft,
   zoom = 1,
@@ -191,8 +185,6 @@ export function NotesButtonView({
   variant: "edge" | "row";
   /** The paper already has a note of its own. */
   has: boolean;
-  /** The notes window stands (the edge tab only): a press closes it. */
-  shown?: boolean;
   /** A card stands in the margin (the explain card, a sticky, the notes window): the edge tab stands beside it, not under it. */
   beside?: boolean;
   /** The margin's left edge in the window's pixels, where a shell has registered one; else the cards stand at the right edge, 360 px wide. */
@@ -223,14 +215,14 @@ export function NotesButtonView({
     return (
       <button
         type="button"
+        data-reader-notes=""
         onClick={onOpen}
         className={cn(
-          buttonVariants({ tone: "soft", size: "lg" }),
-          COMMAND,
-          "w-full justify-start px-3 md:hidden [@media(hover:none)]:min-h-11",
+          "reader-action",
+          "reader-quick-action",
         )}
       >
-        {label}
+        <IconBook size={16} /> {NOTES_LABEL.take}
       </button>
     );
   }
@@ -238,7 +230,6 @@ export function NotesButtonView({
     <button
       type="button"
       onClick={onOpen}
-      aria-expanded={shown}
       title={has ? undefined : TAKE_TITLE}
       style={style}
       className={cn(
@@ -312,18 +303,9 @@ export function NotesButton({
   /** P2-05: the report's answers to them. */
   forYourQuestions?: readonly QuestionAnswers[];
 }) {
-  const [shown, setShown] = useState(false);
-  // The edge tab opens the window; the row navigates, as the band always did.
-  const { ready, own, open: openWindow } = usePaperNotes({
-    paper,
-    questions,
-    forYourQuestions,
-    openWindow: variant === "edge" ? () => setShown(true) : undefined,
-  });
-  // P12-77 (rule 3): the same press that navigates, for the edge tab on a phone. Without `openWindow`, `usePaperNotes` records the place
-  // the reader is at and goes to the notes page; the tab is fixed, so that is wherever they are, not where a row would have taken them.
-  const { open: openPage } = usePaperNotes({ paper, questions, forYourQuestions });
-  const open = () => (variant === "edge" && opensWindow() ? openWindow() : openPage());
+  // Both desktop and mobile open the note on its own page. usePaperNotes
+  // remembers the reader's place so returning to the paper restores it.
+  const { ready, own, open } = usePaperNotes({ paper, questions, forYourQuestions });
   const rect = useMarginRect();
   const standing = useWindows((s) => s.windows.length > 0);
   // P12-77 (ruling §1h.455, item 2): on a phone the cards stand in a band across the foot (`presentation: "bottom"`, left 8), not in a margin at
@@ -333,7 +315,7 @@ export function NotesButton({
   // rule is the band's, not the phone's: a card (or the notes window) standing in a registered bottom band, at any width, is "no side
   // margin". Only a side margin (the rail, `presentation` unset) has the tab stand beside the card at its left edge.
   const phone = usePhone(variant === "edge");
-  const active = variant === "edge" && (standing || shown);
+  const active = variant === "edge" && standing;
   const banded = active && rect?.presentation === "bottom";
   if (!ready) return null;
   // P12-77: Fit's zoom, read where the tab is drawn (it mounts after the notes store has hydrated, never in the server render). It changes the
@@ -343,14 +325,12 @@ export function NotesButton({
       <NotesButtonView
         variant={variant}
         has={own !== undefined}
-        shown={variant === "edge" && shown}
         beside={active && !phone && !banded}
         marginLeft={rect?.left}
         zoom={readPageZoom()}
         bandTop={banded ? rect?.top : undefined}
-        onOpen={variant === "edge" && shown ? () => setShown(false) : open}
+        onOpen={open}
       />
-      {variant === "edge" && shown && <NotesWindow paper={paper} onClose={() => setShown(false)} />}
     </>
   );
 }

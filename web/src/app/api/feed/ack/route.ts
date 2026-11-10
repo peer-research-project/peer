@@ -31,6 +31,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { dashboardLedgerEnabled } from "@/lib/dashboard/ledger-flag";
+import { resolveSeedPool, ackSeedBatch } from "@/lib/seed-pool/server";
+import { seedOutputContext } from "@/lib/seed-pool/output";
 import { SupabaseDashboardDeliveryLedger } from "@/lib/dashboard/delivery-ledger";
 
 export const dynamic = "force-dynamic";
@@ -55,10 +57,7 @@ function json(body: unknown, status: number): NextResponse {
 }
 
 export async function POST(request: NextRequest) {
-  // Flag off: report not found before touching auth or the ledger at all.
-  if (!dashboardLedgerEnabled()) {
-    return json({ error: "not_enabled" }, 404);
-  }
+  const legacyEnabled = dashboardLedgerEnabled();
 
   // Parse + validate before any I/O. Any shape problem -- unparseable JSON,
   // a missing/wrong-typed/non-UUID batchId -- collapses to the same 400;
@@ -80,10 +79,24 @@ export async function POST(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) {
-    return json({ error: "unauthenticated" }, 401);
+    return legacyEnabled ? json({ error: "unauthenticated" }, 401) : json({ error: "not_enabled" }, 404);
   }
 
+  const resolution = await resolveSeedPool(user.id);
+  if (resolution.status === "unavailable" || resolution.schemaInstalled === null) return json({ error: "ledger_unavailable" }, 503);
+  if (resolution.schemaInstalled === false && !legacyEnabled) return json({ error: "not_enabled" }, 404);
   const ledger = new SupabaseDashboardDeliveryLedger();
+  if (resolution.schemaInstalled === true) {
+    const batch = await ledger.getBatchById(user.id, batchId);
+    if (!batch) return json({ error: "batch_not_found" }, 404);
+    const context = seedOutputContext(await resolveSeedPool(user.id, { targetLocalDate: batch.localDate }), batch.localDate);
+    if (context.kind !== "ready") return json({ error: "ledger_unavailable" }, 503);
+    const fenced = await ackSeedBatch({ ownerId: user.id, batchId, localDate: batch.localDate, expectedVersion: context.version, expectedRevocationGeneration: context.revocationGeneration });
+    if (!fenced || fenced.status === "stale_pool") return json({ error: "ledger_unavailable" }, 503);
+    if (fenced.status === "acknowledged") return json({ ok: true, alreadyAcknowledged: false }, 200);
+    if (fenced.status === "already_acknowledged") return json({ ok: true, alreadyAcknowledged: true }, 200);
+    return json({ error: "batch_not_found" }, 404);
+  }
   let result: Awaited<ReturnType<typeof ledger.acknowledgeBatch>>;
   try {
     result = await ledger.acknowledgeBatch(user.id, batchId);

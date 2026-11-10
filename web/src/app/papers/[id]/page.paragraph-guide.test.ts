@@ -27,7 +27,11 @@ function guideProblems(source: string): string[] {
   const problems: string[] = [];
 
   if (!text.includes('import { useParagraphGuide } from "@/components/reader/use-paragraph-guide";')) problems.push("the page no longer imports the hook");
-  if (!text.includes('import { deepReportRequested, useModelReport } from "@/components/reader/use-model-report";')) problems.push("the page no longer imports the report's deep predicate from the report hook");
+  // Other named imports may share this declaration; both required bindings
+  // must still come from the report hook itself.
+  const named = /import\s*\{([^}]*)\}\s*from\s*["']@\/components\/reader\/use-model-report["']/.exec(text)?.[1] ?? "";
+  const bindings = named.split(",").map((value) => value.trim());
+  if (!bindings.includes("deepReportRequested") || !bindings.includes("useModelReport")) problems.push("the page no longer imports the report's deep predicate from the report hook");
   if (text.split("useParagraphGuide({").length - 1 !== 1) problems.push("the hook is not called exactly once");
   // P10-07a: the hook returns `{ gists, partition }`; the page names the gists `paragraphGists` and reads the partition.
   const call = /const \{ gists: paragraphGists, partition: paragraphPartition \} = useParagraphGuide\(\{[^}]*\}\);/.exec(text)?.[0] ?? "";
@@ -61,7 +65,7 @@ function guideProblems(source: string): string[] {
   return problems;
 }
 
-const source = readFileSync(resolve(process.cwd(), "src/app/papers/[id]/page.tsx"), "utf8");
+const source = readFileSync(resolve(process.cwd(), "src/app/papers/[id]/page.tsx"), "utf8").replace(/\r\n/g, "\n");
 
 describe("the page's paragraph gist wiring (P3-03)", () => {
   it("is as the ruling says", () => {
@@ -88,10 +92,15 @@ describe("the page's paragraph gist wiring (P3-03)", () => {
     expect(guideProblems(source.replace("deepReportRequested(profile, ready ? paper : undefined, aiMode)", "deepReportRequested(profile, paper, aiMode)"))).toContain(GATE_PROBLEM);
   });
 
-  it("would notice the predicate no longer imported from the report hook", () => {
-    expect(guideProblems(source.replace("import { deepReportRequested, useModelReport }", "import { useModelReport }"))).toContain(
-      "the page no longer imports the report's deep predicate from the report hook",
-    );
+  it("would notice either required binding removed from the report hook import", () => {
+    for (const binding of ["deepReportRequested", "useModelReport"]) {
+      const changed = source.replace(new RegExp(`\\b${binding}\\s*,?\\s*`), "");
+      expect(changed).not.toBe(source);
+      expect(guideProblems(changed)).toContain("the page no longer imports the report's deep predicate from the report hook");
+    }
+    const wrongModule = source.replace('from "@/components/reader/use-model-report"', 'from "@/components/reader/other"');
+    expect(wrongModule).not.toBe(source);
+    expect(guideProblems(wrongModule)).toContain("the page no longer imports the report's deep predicate from the report hook");
   });
 
   it("would notice the paper asked about before its attachment is resolved", () => {

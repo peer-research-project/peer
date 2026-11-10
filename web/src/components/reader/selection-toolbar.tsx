@@ -74,6 +74,8 @@
 // (`canExplain`; the request clips the passage at the route's cap and the card shows its opening words, `explain-box.tsx`).
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { IconBook } from "@/components/icons";
+import "./selection-toolbar.css";
 import type { PaperTerm } from "@/lib/papers/report";
 import { setHighlightOffer, setNoteOffer } from "@/lib/reader/explain-offer";
 import { MARGIN_CARD_SELECTOR, placeInMargin, useMarginRect, type MarginRect } from "@/lib/reader/margin";
@@ -93,15 +95,17 @@ export function selectionCanExplain(input: { canAsk: boolean; terms: readonly Pa
 
 export const SELECTION_LABELS = { explain: "Explain this", note: "Take notes", highlight: "Highlight" } as const;
 
-export type SelectionAction = "explain" | "note" | "highlight";
+export type SelectionAction = "explain" | "note" | "highlight" | "bold" | "circle";
 
 /**
  * Which of the three actions are on offer, in the order they stand: Explain this when the page can explain (P10-08b), Take notes
  * always, Highlight only when the page hands a handler and says the selection can be highlighted. Pure.
  */
-export function offeredActions(input: { canExplain: boolean; onHighlight?: unknown; canHighlight?: boolean }): SelectionAction[] {
+export function offeredActions(input: { canExplain: boolean; onHighlight?: unknown; canHighlight?: boolean; onBold?: unknown; onCircle?: unknown; canFormat?: boolean }): SelectionAction[] {
   const highlight = typeof input.onHighlight === "function" && input.canHighlight === true;
-  return [...(input.canExplain ? (["explain"] as const) : []), "note", ...(highlight ? (["highlight"] as const) : [])];
+  const bold = typeof input.onBold === "function" && input.canFormat === true;
+  const circle = typeof input.onCircle === "function" && input.canFormat === true;
+  return [...(input.canExplain ? (["explain"] as const) : []), "note", ...(highlight ? (["highlight"] as const) : []), ...(bold ? (["bold"] as const) : []), ...(circle ? (["circle"] as const) : [])];
 }
 
 /** The room between the pill and the selection's first line. */
@@ -621,8 +625,6 @@ export function actionsPlace(input: {
   return { mode: "margin", left: spot.left, top: spot.top, below: false, ...(spot.how === "level" ? {} : { clear: spot.how }) };
 }
 
-const BUTTON =
-  "px-3 py-1.5 text-heading transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:bg-surface-hover";
 
 export function SelectionToolbarView({
   place,
@@ -630,6 +632,8 @@ export function SelectionToolbarView({
   onExplain,
   onTakeNote,
   onHighlight,
+  onBold,
+  onCircle,
   overCard = false,
   innerRef,
 }: {
@@ -641,6 +645,8 @@ export function SelectionToolbarView({
   onTakeNote: () => void;
   /** P11-13: the third action. Absent, there is no Highlight button (the page has none to hand, or it cannot highlight this selection). */
   onHighlight?: () => void;
+  onBold?: () => void;
+  onCircle?: () => void;
   /** P11-27: the group stands over an open card of the margin (it is above it in z-order, on its own surface). */
   overCard?: boolean;
   innerRef?: (el: HTMLDivElement | null) => void;
@@ -648,10 +654,6 @@ export function SelectionToolbarView({
   // A press must not move the selection: the words stay highlighted while the pill is used.
   const keep = (event: { preventDefault: () => void }) => event.preventDefault();
   const column = place.mode === "margin";
-  // A divider between the buttons: over each but the first in the column, on the left of each but the first in the row.
-  const divider = column ? "border-t border-border-strong text-left" : "border-l border-border-strong";
-  let drawn = 0;
-  const button = () => (drawn++ === 0 ? (column ? `${BUTTON} text-left` : BUTTON) : `${BUTTON} ${divider}`);
   return (
     <div
       ref={innerRef}
@@ -663,21 +665,26 @@ export function SelectionToolbarView({
       {...(overCard ? { "data-over-card": "" } : {})}
       {...(place.clear ? { "data-header-clear": place.clear } : {})}
       style={{ left: place.left, top: place.top }}
-      className={`fixed z-[70] flex ${column ? "flex-col" : ""} items-stretch whitespace-nowrap border border-border-strong bg-surface font-mono text-caption shadow-card-hover`}
+      className={`reader-selection-toolbar fixed z-[70] bg-surface border border-border-strong shadow-card-hover ${column ? "flex-col" : ""}`}
     >
       {canExplain && (
-        <button type="button" data-selection-explain="" onMouseDown={keep} onClick={onExplain} className={button()}>
+        <button type="button" data-selection-explain="" onMouseDown={keep} onClick={onExplain} className="reader-selection-action">
+          <span aria-hidden="true" className="reader-selection-glyph">✦</span>
           {SELECTION_LABELS.explain}
         </button>
       )}
-      <button type="button" data-selection-note="" onMouseDown={keep} onClick={onTakeNote} className={button()}>
+      <button type="button" data-selection-note="" onMouseDown={keep} onClick={onTakeNote} className="reader-selection-action">
+        <IconBook size={15} strokeWidth={1.8} />
         {SELECTION_LABELS.note}
       </button>
       {onHighlight && (
-        <button type="button" data-selection-highlight="" onMouseDown={keep} onClick={onHighlight} className={button()}>
+        <button type="button" data-selection-highlight="" onMouseDown={keep} onClick={onHighlight} className="reader-selection-action">
+          <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="m5 16 8-8 4 4-8 8H5v-4Z"/><path d="m12 9 3-3a2 2 0 0 1 3 0l1 1a2 2 0 0 1 0 3l-3 3M4 21h16"/></svg>
           {SELECTION_LABELS.highlight}
         </button>
       )}
+      {onBold && <button type="button" data-selection-bold="" onMouseDown={keep} onClick={onBold} className="reader-selection-action"><strong aria-hidden="true" className="reader-selection-glyph">B</strong> Bold</button>}
+      {onCircle && <button type="button" data-selection-circle="" onMouseDown={keep} onClick={onCircle} className="reader-selection-action"><span aria-hidden="true" className="reader-selection-glyph reader-selection-circle">◯</span> Circle</button>}
     </div>
   );
 }
@@ -722,7 +729,7 @@ const sameFrame = (a: Frame | null, b: Frame | null) =>
 type Size = { width: number; height: number };
 
 /** What the group measures before it has been drawn in a mode with this many buttons (a button is about 28 px tall and 100 wide). */
-const estimate = (mode: ActionsMode, buttons: number): Size => (mode === "margin" ? { width: 112, height: 29 * buttons + 1 } : { width: 100 * buttons, height: 30 });
+const estimate = (mode: ActionsMode, buttons: number): Size => (mode === "margin" ? { width: 112, height: 40 * buttons + 1 } : { width: 100 * buttons, height: 40 });
 
 export function SelectionToolbar({
   target,
@@ -730,6 +737,8 @@ export function SelectionToolbar({
   onExplain,
   onTakeNote,
   onHighlight,
+  onBold,
+  onCircle,
   canHighlight = false,
 }: {
   target: ExplainSelection | null;
@@ -739,6 +748,8 @@ export function SelectionToolbar({
   onTakeNote: (target: ExplainSelection) => void;
   /** P11-13: the page's highlight (C P11-07's `useHighlight`). Until the page passes it there is no Highlight button. */
   onHighlight?: (target: ExplainSelection) => void;
+  onBold?: (target: ExplainSelection) => void;
+  onCircle?: (target: ExplainSelection) => void;
   /** P11-13: the page can highlight this selection (`canHighlight(target)`: a paragraph, a heading or a caption of the paper's body, a Summary block or an answer). */
   canHighlight?: boolean;
 }) {
@@ -754,7 +765,8 @@ export function SelectionToolbar({
   // P11-42 (rule 2; ruling §1h.139 (b)): Explain this is offered for a selection in a heading or a caption as for a paragraph's — the page's word stands. The route finds
   // such a passage now (`lib/papers/explain.ts`, `locatePassage` with `blocks`); the header's note on P11-27 rule 2 (not offered for it) is retired by this.
   const explainable = canExplain;
-  const actions = offeredActions({ canExplain: explainable, onHighlight, canHighlight });
+  const canFormat = canHighlight && (target?.source === undefined || target.source === "paper");
+  const actions = offeredActions({ canExplain: explainable, onHighlight, canHighlight, onBold, onCircle, canFormat });
   const buttons = actions.length;
 
   // Where the selection is now, with the cards that stand open beside it; and again after each scroll or resize, each change of the
@@ -834,13 +846,19 @@ export function SelectionToolbar({
   // Its own size, once it is drawn, so the clamp at the right edge and the cards' test are exact.
   useLayoutEffect(() => {
     const el = box.current;
-    if (!el || drawnMode === null) return;
+    if (!el || drawnMode === null || !frame || !place) return;
     const rect = el.getBoundingClientRect();
     const next = { width: rect.width, height: rect.height };
     if (next.width <= 0 || next.height <= 0) return;
+    // Use the rendered height, not the initial estimate, to keep the toolbar
+    // clear of the selected lines even after a font or zoom change.
+    if (drawnMode === "above") {
+      const actual = toolbarPlace({ bounds: frame.bounds, viewport: frame.viewport, size: next });
+      if (actual) el.style.top = `${place.top + actual.top - rect.top}px`;
+    }
     const key = `${drawnMode}:${buttons}`;
     setSizes((current) => (current[key]?.width === next.width && current[key]?.height === next.height ? current : { ...current, [key]: next }));
-  }, [drawnMode, buttons]);
+  }, [drawnMode, buttons, target, frame, place]);
 
   // P11-38 rule 1, a new drag: the page keeps the same selection object when the words selected are the same, so a drag over the words Explain this was pressed for would
   // never be news. A press that changed the selection (a `selectionchange` between the press and its release) and left one standing is a new selection: the wait ends — in a
@@ -896,6 +914,8 @@ export function SelectionToolbar({
   if (target?.unavailableReason) return <div role="status" className="pointer-events-none fixed inset-x-4 bottom-20 z-[69] mx-auto w-fit max-w-[calc(100%-2rem)] rounded bg-heading px-3 py-2 text-body-sm text-bg">{target.unavailableReason}</div>;
   if (!target || !place) return null;
   const highlight = actions.includes("highlight") ? () => onHighlight?.(target) : undefined;
+  const bold = actions.includes("bold") ? () => onBold?.(target) : undefined;
+  const circle = actions.includes("circle") ? () => onCircle?.(target) : undefined;
   // P11-38 rule 1: the press explains, and ends the group's job and the selection (in the margin; the pill above the selection is as it was).
   const explain = () => {
     onExplain();
@@ -903,6 +923,6 @@ export function SelectionToolbar({
     if (place.mode === "margin") dropSelection();
   };
   return (
-    <SelectionToolbarView place={place} canExplain={explainable} onExplain={explain} onTakeNote={() => onTakeNote(target)} onHighlight={highlight} overCard={overCard} innerRef={(el) => (box.current = el)} />
+    <SelectionToolbarView place={place} canExplain={explainable} onExplain={explain} onTakeNote={() => onTakeNote(target)} onHighlight={highlight} onBold={bold} onCircle={circle} overCard={overCard} innerRef={(el) => (box.current = el)} />
   );
 }

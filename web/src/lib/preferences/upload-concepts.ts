@@ -40,7 +40,12 @@ import { ABBREVIATION_GROUPS, canonicalize, isGenericTerm } from "@/lib/scoring/
 // running foot is one head whichever side its page number stands, counted over the pages that carry text. Text cached under
 // 13 still holds the tick strings and axis titles of a tall figure and the foot of a paper whose folio alternates sides.
 // It does not touch the figure engine, so FIGURE_EXTRACTION_REVISION (the figure boxes and cuts) is not bumped.
-export const UPLOAD_CONCEPT_EXTRACTION_VERSION = 14;
+// 15 (R-C3b, W20): no concept label holds a verb (`holdsVerb`). The PDF reading itself is unchanged, so the
+// bump only makes the server read each upload's text once more (a cache miss on the 14 key, then the stored
+// PDF is read and the sidecar is rewritten under 15); nothing is deleted. Concepts already stored on an upload
+// or a seed are not recomputed by it.
+// 16: reread with the combined column, figure-text and footer extraction improvements.
+export const UPLOAD_CONCEPT_EXTRACTION_VERSION = 16;
 
 // A conservative, local phrase extractor. No document text is sent to a model
 // for preference learning. References, author blocks and boilerplate are out.
@@ -105,6 +110,75 @@ function isAcceptableCandidate(label: string): boolean {
   return !tokens.every((token) => STOP.has(token) || isGenericTerm(token));
 }
 
+// R-P1 (W9, 2026-11-04): a phrase may not start or end on a verb-like or
+// function word ("electrolyte concentration affects", "retention after rain").
+// The n-gram builder already breaks on every STOP word and on tokens shorter
+// than three letters, so of this list only affects/affect/affected/after can
+// reach a candidate today; the rest are listed so the rule reads as ruled.
+// Trimming is a filter: the trimmed phrase ("electrolyte concentration") is
+// always a candidate of its own, from the same occurrences, with at least the
+// same count and title flag, so dropping the untrimmed form is "trim, then
+// dedupe" without counting any occurrence twice. The trimmed phrase still
+// faces every other gate (a single word must be a known domain term), and no
+// score or weight changes. A verb inside a phrase ("density affects water")
+// is R-C3b's rule, below.
+// Exported for R-C18 (W11): a seed reason never quotes a phrase holding one of these words anywhere.
+// R-C3b (W20) added the finite verbs on the last two lines: verb-only forms common in abstract prose,
+// never a noun spelling ("reaches", "remains", "yields", "leads", "drives", "controls" stay out).
+export const PHRASE_BOUNDARY_WORDS: ReadonlySet<string> = new Set(("affects affect affected using used shows show is are was were " +
+  "of for with and the a an to in on after under than how " +
+  "reduces reduce enhances enhance determines determine promotes promote inhibits inhibit suppresses suppress " +
+  "regulates regulate mediates mediate governs govern retains retain maintains maintain contains contain " +
+  "depends depend differs differ occurs occur exceeds exceed outperforms outperform explains explain reveals reveal " +
+  "indicates indicate suggests suggest provides provide requires require").split(" "));
+const BOUNDARY_WORDS = PHRASE_BOUNDARY_WORDS;
+
+function endsOnFunctionWord(label: string): boolean {
+  const tokens = label.split(" ");
+  return BOUNDARY_WORDS.has(tokens[0]) || BOUNDARY_WORDS.has(tokens[tokens.length - 1]);
+}
+
+// R-C3b (W20, 2026-11-04): no facet label holds a verb. R-P1 trims the edges;
+// this drops a phrase with a verb anywhere in it: a word from the list above
+// ("density affects water", "retention after rain"), or a past participle
+// ("-ed") after the first word, where it reads as the verb of the words
+// before it ("denser foliage retained", "concentration maintained capacity").
+// As with R-P1 this is a filter, never an edit: every shorter n-gram of the
+// same occurrences ("denser foliage", "electrolyte concentration") is already
+// a candidate with at least the same count, so dropping the verb-holding form
+// splits it at the verb without inventing a word, and the pieces still face
+// every other gate. A first-word participle is an adjective ("doped cathode",
+// "supervised learning") and stays; so does a hyphenated compound
+// ("nitrogen-doped"), which is one token. "-ing" is not judged by its shape:
+// after a noun it is almost always a known term ("machine learning", "remote
+// sensing", "electrochemical cycling"), so only a listed "-ing" verb counts.
+// A known term whose later word only looks like a participle is kept by the
+// explicit list below (its adjacent word pairs are exempt), with a test.
+export const KNOWN_PARTICIPLE_TERMS: readonly string[] = [
+  "machine learning", "deep learning", "remote sensing", "boundary layer",
+  "surface enhanced raman", "plasma enhanced", "laser induced", "light induced", "drug induced", "stress induced",
+  "time resolved", "angle resolved", "self assembled", "self supervised", "semi supervised", "weakly supervised",
+  "fully connected", "computer aided", "physics informed", "fiber reinforced", "highly ordered",
+  "nitrogen doped", "fluorine doped", "boron doped", "carbon coated", "glucose stimulated",
+];
+const KNOWN_TERM_PAIRS = new Set(KNOWN_PARTICIPLE_TERMS.flatMap((term) => {
+  const words = term.split(" ");
+  return words.slice(1).map((word, i) => `${words[i]} ${word}`);
+}));
+// Words ending in "-ed" that are not participles.
+const NOT_PARTICIPLE = new Set(["infrared", "hundred", "kindred", "sacred", "naked", "wicked", "rugged", "jagged", "ragged", "crooked", "beloved", "embed"]);
+
+function isParticipleShaped(token: string): boolean {
+  return token.length >= 5 && token.endsWith("ed") && !token.endsWith("eed") && !token.includes("-") && !NOT_PARTICIPLE.has(token);
+}
+
+/** R-C3b: true when a phrase holds a verb anywhere (see above). */
+export function holdsVerb(label: string): boolean {
+  const tokens = label.split(" ");
+  return tokens.some((token, i) => BOUNDARY_WORDS.has(token)
+    || (i > 0 && isParticipleShaped(token) && !KNOWN_TERM_PAIRS.has(`${tokens[i - 1]} ${token}`)));
+}
+
 // 9-21: rule-based facet classification (handoff §4.1's method/material/topic
 // split) — a short, closed cue list, never a model call or taxonomy lookup.
 const METHOD_CUES = new Set([
@@ -112,10 +186,18 @@ const METHOD_CUES = new Set([
   "synthesis", "model", "algorithm", "benchmark", "dataset", "chromatography",
   "voltammetry", "calorimetry", "titration", "regression", "embedding",
   "embeddings", "network", "imaging", "transform",
+  // R-C3 (W11, 2026-11-04): a small, explicit set of domain-general
+  // measurement and survey methods (field, social, transport, ecology), so
+  // method recognition is not materials-science-only. Still a closed list.
+  "photogrammetry", "sensor", "sensors", "survey", "surveys", "interview",
+  "interviews", "tracing", "profiler", "profilers", "microsimulation",
+  "detector", "detectors", "logger", "loggers", "measurement", "measurements",
 ]);
 const MATERIAL_CUES = new Set([
   "alloy", "oxide", "perovskite", "electrolyte", "composite", "polymer",
   "ceramic", "catalyst", "cathode", "anode", "nanoparticle", "nanoparticles",
+  // R-C3 (W11): a few domain-general studied substances outside materials science.
+  "sediment", "sediments", "soil", "soils", "groundwater", "biomass", "tissue",
 ]);
 // "-ide"/"-ate"/"-ite" suffix cue, guarded by a length floor so short,
 // unrelated words ("site", "quite") don't false-positive into "material".
@@ -158,7 +240,7 @@ export function extractUploadConcepts(doc: ExtractedDocument): PreferenceConcept
     }
   }
   const ranked = [...candidates].filter(([label, c]) => label.length <= 70 && (c.title || c.count >= 2))
-    .filter(([label]) => isAcceptableCandidate(label))
+    .filter(([label]) => isAcceptableCandidate(label) && !endsOnFunctionWord(label) && !holdsVerb(label))
     .sort((a, b) => b[1].score - a[1].score || a[0].localeCompare(b[0]));
   const out: PreferenceConcept[] = [];
   for (const [label, c] of ranked) {

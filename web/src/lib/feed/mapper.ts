@@ -126,6 +126,7 @@ export function rawItemToPaper(
     title: cleanedTitle,
     authors: item.authors.map(cleanDisplayText).filter(Boolean),
     ...(item.leadAffiliation ? { leadAffiliation: cleanDisplayText(item.leadAffiliation) } : {}),
+    ...(item.leadInstitutionId ? { leadInstitutionId: item.leadInstitutionId } : {}),
     relevanceReason: cleanDisplayText(options.relevanceReason),
     venue,
     source: mapSource(item.source, venue),
@@ -133,6 +134,7 @@ export function rawItemToPaper(
     summaryExperimentKeywords: keywords,
     summaryResultDiscussion: discussion,
     tldr: cleanDisplayTextOrUndefined(item.tldr),
+    abstractRetrieval: item.metadata.abstractRetrieval,
     linkPaper,
     linkArxiv,
     doi: item.metadata?.doi

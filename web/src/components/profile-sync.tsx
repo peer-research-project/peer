@@ -24,6 +24,7 @@ import { supabase } from "@/lib/supabase/client";
 import { useProfileStore } from "@/store/profile";
 import { defaultProfile, type UserProfile } from "@/types";
 import { profileFeedIntentCard } from "@/lib/feed/intent";
+import { isReturningAccountSignIn } from "@/lib/profile/first-visit";
 import {
   mergeProfileAtSignIn,
   dirtySingleValueFields,
@@ -64,16 +65,32 @@ import {
 // `"signed-out"`, not back to `"unknown"`.
 export type AuthOutcome = "unknown" | "signed-in" | "signed-out" | "unconfigured";
 
+//
+// W27 (R-ONB-1, 2026-11-06) — `returningAccount` is true from the moment the
+// sign-in pull shows that the account which just signed in on this device had
+// already been set up (`isReturningAccountSignIn`, lib/profile/first-visit.ts),
+// until FirstRunGate has acted on it: on /welcome it stamps onboardedAt and
+// leaves the walkthrough for `/`, and the wizard holds its blank layout while
+// this is up so no half-finished step paints. It is set before `settled`
+// flips, and it is not gated on `settled`, so a pull slower than the settle
+// timeout still lands it.
 export const useSyncGate = create<{
   settled: boolean;
   authUserId: string | null;
   authOutcome: AuthOutcome;
+  returningAccount: boolean;
 }>(() => ({
   settled: false,
   authUserId: null,
   authOutcome: "unknown",
+  returningAccount: false,
 }));
 const markSyncSettled = () => useSyncGate.setState({ settled: true });
+
+/** FirstRunGate's "done": the returning-account signal has been acted on. */
+export function clearReturningAccount(): void {
+  useSyncGate.setState({ returningAccount: false });
+}
 
 const DEBOUNCE_MS = 700;
 
@@ -136,37 +153,34 @@ async function fetchRemoteForSync(): Promise<
 }
 
 /**
- * Local keys (the model key, the Jev key, Tavily, and — SIGNIN-MERGE §1aj —
- * the Adzuna/USAJobs credentials of the stopped jobs feed) never leave the
- * device.
+ * Local keys (the model key, the Jev key, and — SIGNIN-MERGE §1aj — the
+ * Adzuna/USAJobs credentials of the stopped jobs feed and the removed Tavily
+ * key) never leave the device.
  *
- * The Adzuna/USAJobs fields are no longer part of `UserProfile` (no screen sets
- * them, and the feed they served is stopped), so they in practice never hold a
- * value — but a restored backup file (see the profile page's "Restore from a
- * backup file" control) or a blob saved before CAN carry a real one, and
- * without the by-name strip below it would ride along in the very next
- * debounced PUT body. `profilePatchToRow` has no column for any of the four, so
- * it could not reach the database either way, but it would still leave the
- * browser in plaintext over the wire and land in a request body / server log —
- * exactly what "never uploaded" means to prevent. Proven by
- * web/src/components/profile-sync.test.tsx.
+ * The Adzuna/USAJobs and Tavily fields are no longer part of `UserProfile` (no
+ * screen sets them; the feed Adzuna and USAJobs served is stopped and Tavily
+ * web search is removed), so they in practice never hold a value — but a
+ * restored backup file (see the profile page's "Restore from a backup file"
+ * control) or a blob saved before CAN carry a real one, and without the
+ * by-name strip below it would ride along in the very next debounced PUT body.
+ * `profilePatchToRow` has no column for any of them, so it could not reach the
+ * database either way, but it would still leave the browser in plaintext over
+ * the wire and land in a request body / server log — exactly what "never
+ * uploaded" means to prevent. Proven by web/src/components/profile-sync.test.tsx.
  *
- * The same strip drops the event and job topic lists and the events/jobs halves
- * of `activeSearchInputs` that such a blob can still hold (rulings 60): nothing
- * about those stopped feeds is pushed either.
+ * The same strip drops the event and job topic lists, the events/jobs halves
+ * of `activeSearchInputs` (rulings 60) and the Tavily switch that such a blob
+ * can still hold: nothing about those stopped feeds or that removed search is
+ * pushed either.
  */
 export function remoteProfilePayload(profile: UserProfile): Partial<UserProfile> {
   const {
-    tavilyEnabled,
-    tavilyApiKey,
     feedAiProvider,
     feedAiApiKey,
     jevApiKey,
     standingQuestions,
     ...rest
   } = profile;
-  void tavilyEnabled;
-  void tavilyApiKey;
   void feedAiProvider;
   void feedAiApiKey;
   // The reader's Jev key never leaves the browser except in the paper request
@@ -680,11 +694,30 @@ export function shouldClearOnConfirmedSignOut(
   return cookiePresent && authOutcome === "signed-out" && syncedAccountId !== null;
 }
 
+/**
+ * OWN-KEY lane 4 (R13, D4) — whether a confirmed sign-out must clear this
+ * browser's API keys. The cookie and the CONFIRMED "signed-out" outcome, and
+ * nothing else: unlike `shouldClearOnConfirmedSignOut`, no recorded owner is
+ * required. The sign-out dialog promises the keys go, and an owner can be
+ * missing while signed in (a "Reset profile to defaults" nulls it until the
+ * next auth event), so a rule that waited for one could leave a key for the
+ * next person on this browser — and for the next account, which then would
+ * not even be seen as a switch.
+ */
+export function shouldClearDeviceKeysOnSignOut(
+  cookiePresent: boolean,
+  authOutcome: AuthOutcome,
+): boolean {
+  return cookiePresent && authOutcome === "signed-out";
+}
+
 export interface ProcessConfirmedSignOutCookieDeps {
   cookiePresent: boolean;
   authOutcome: AuthOutcome;
   syncedAccountId: string | null;
   logOut: () => void;
+  /** The profile store's `clearDeviceKeys()`: the API keys only. */
+  clearDeviceKeys: () => void;
   deleteCookie: () => void;
 }
 
@@ -698,9 +731,16 @@ export interface ProcessConfirmedSignOutCookieDeps {
  * warranted, THEN always consume (delete) the cookie regardless of that
  * decision — a guest's browser must not keep carrying a stale cookie into
  * a LATER sign-in this same session.
+ *
+ * OWN-KEY lane 4 (R13, D4) — and on a confirmed sign-out the API keys are
+ * cleared first, always (`shouldClearDeviceKeysOnSignOut`), whether or not
+ * an owner is recorded; the full `logOut()` still runs only when one is.
  */
 export function processConfirmedSignOutCookie(deps: ProcessConfirmedSignOutCookieDeps): void {
   if (!deps.cookiePresent) return;
+  if (shouldClearDeviceKeysOnSignOut(deps.cookiePresent, deps.authOutcome)) {
+    deps.clearDeviceKeys();
+  }
   if (shouldClearOnConfirmedSignOut(deps.cookiePresent, deps.authOutcome, deps.syncedAccountId)) {
     deps.logOut();
   }
@@ -846,6 +886,7 @@ export function ProfileSync() {
         // P4-S5b-FIX3 — a CONFIRMED sign-out (never a rejected/unresolved
         // auth check — see the `.catch()` below, which deliberately leaves
         // this untouched). Clears any previously-published id.
+        clearReturningAccount();
         useSyncGate.setState({ authUserId: null, authOutcome: "signed-out" });
         // ACCOUNT-SWITCH (§1bt.8 AMENDMENT (b)) — checked exactly here:
         // the one moment `authOutcome` becomes the CONFIRMED "signed-out"
@@ -862,6 +903,7 @@ export function ProfileSync() {
             authOutcome: "signed-out",
             syncedAccountId: useProfileStore.getState().syncedAccountId,
             logOut: () => useProfileStore.getState().logOut(),
+            clearDeviceKeys: () => useProfileStore.getState().clearDeviceKeys(),
             deleteCookie: deleteSignOutCookie,
           });
         }
@@ -878,6 +920,12 @@ export function ProfileSync() {
       // or fail outright — see markSyncSettled in the `finally` below: a
       // FAILED pull still settles, and the owner id above is already set.
       useSyncGate.setState({ authUserId: userId, authOutcome: "signed-in" });
+
+      // W27 (R-ONB-1 rule 2) — who this device had confirmed before THIS
+      // sign-in, read before the switch check and the owner publish below
+      // overwrite it. `null` after a sign-out (`logOut()` clears it) or on a
+      // fresh device; this user's own id on a plain reload.
+      const previousOwner = useProfileStore.getState().syncedAccountId;
 
       // ACCOUNT-SWITCH (§1bt point 1) — before today's existing
       // pull/merge/push logic runs at all, check whose data this device is
@@ -939,6 +987,12 @@ export function ProfileSync() {
         const { patch, pushPayload, merged } = planReconcile(local, remote, lastSynced);
         if (Object.keys(patch).length > 0) {
           useProfileStore.setState((s) => ({ profile: { ...s.profile, ...patch } }));
+        }
+        // W27 (R-ONB-1 rule 1) — judged on `remote` as fetched, before this
+        // session's push, and after the merged profile is in the store (so
+        // FirstRunGate's completeOnboarding promotes the account's topics).
+        if (isReturningAccountSignIn(previousOwner, userId, remote)) {
+          useSyncGate.setState({ returningAccount: true });
         }
 
         // Reconcile the account to whatever this merge just decided. A push

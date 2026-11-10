@@ -25,6 +25,7 @@ import {
   POLL_DELAYS_MS,
   POLL_EVERY_MS,
   READING_VERSION,
+  READING_CACHE_KEY,
   buildReadingKey,
   pollDelayMs,
   sentencesWhileWaiting,
@@ -114,7 +115,7 @@ async function advance(ms: number) {
 }
 /** When each ask was made, in milliseconds after the first of them. */
 const times = () => asks.map((ask) => ask.at - asks[0].at);
-const stored = () => localStorage.getItem("peer-reading-v2");
+const stored = () => localStorage.getItem(READING_CACHE_KEY);
 
 describe("useReading — P12-58 rule 3: it keeps asking while the full text is pending", () => {
   beforeEach(() => {
@@ -147,14 +148,14 @@ describe("useReading — P12-58 rule 3: it keeps asking while the full text is p
   // P12-97, RE-AIMED: 17 was the 'pending' value (P12-58); the version is 18 now, for the figure text and the running foot that
   // leave an uploaded PDF's paragraphs. The test's point, that the hook reads the number the reading is built with, is unchanged.
   it("the reading's version is 18 (17 came with the 'pending' value, 18 with P12-97), and the hook reads the same number the reading is built with", () => {
-    expect(READING_VERSION).toBe(18);
+    expect(READING_VERSION).toBe(20);
     expect(buildReading(base, null).version).toBe(READING_VERSION);
     expect(markFullTextPending(buildReading(base, null)).version).toBe(READING_VERSION);
   });
 
   it("a reading kept by the build before (version 16, here one that says 'pending') is not used: the page asks for it again", async () => {
     const kept = { ...answerOf(base, "pending"), version: 16 };
-    localStorage.setItem("peer-reading-v2", JSON.stringify({ [buildReadingKey(base.id, undefined, base.revision)]: { reading: kept, ts: Date.now() } }));
+    localStorage.setItem(READING_CACHE_KEY, JSON.stringify({ [buildReadingKey(base.id, undefined, base.revision)]: { reading: kept, ts: Date.now() } }));
     script = () => reply(answerOf(current, "pdf"));
 
     const opened = open(base);

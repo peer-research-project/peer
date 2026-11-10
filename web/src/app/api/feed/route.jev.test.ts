@@ -1,3 +1,8 @@
+// These cases exercise the schema-absent legacy pipeline.
+vi.mock("@/lib/seed-pool/server", () => ({
+  resolveSeedPool: vi.fn().mockResolvedValue({ status: "none", schemaInstalled: false, ownerLocalDate: null, timezone: null, snapshot: null, revision: 0, revocationGeneration: 0 }),
+  putSeedPreparedBatch: vi.fn(), markSeedBatchServed: vi.fn(), recordSeedFeedServed: vi.fn(), ackSeedBatch: vi.fn(), putSeedPrivatePool: vi.fn(),
+}));
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 

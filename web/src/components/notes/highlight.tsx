@@ -18,6 +18,7 @@
 
 import { useCallback } from "react";
 import type { Paper } from "@/types";
+import type { ReadingMarkStyle } from "@/lib/notes/types";
 import type { QuestionAnswers } from "@/lib/papers/report";
 import { citableFromPaper } from "@/lib/notes/cite";
 import { DEFAULT_HIGHLIGHT_COLOUR } from "@/lib/notes/highlight-colours";
@@ -89,6 +90,7 @@ export function highlightSelection(
     forYourQuestions?: readonly QuestionAnswers[];
     /** The paper's body as the page renders it; the paragraph the selection is in gives the highlight its range. */
     body?: readonly { paragraphs: readonly string[] }[];
+    style?: ReadingMarkStyle;
   },
 ): { id: string; created: boolean } | null {
   if (!canHighlight(target)) return null;
@@ -100,11 +102,13 @@ export function highlightSelection(
     if (typeof document === "undefined" || target.segments.some((s) => !document.getElementById(s.paragraphId))) return null;
     const had = readingNoteFor(useNotesStore.getState().notes, input.paper.id) !== undefined;
     const noteId = useNotesStore.getState().ensureReadingNote(citableFromPaper(input.paper), { questions: input.questions, forYourQuestions: input.forYourQuestions });
-    const made = useNotesStore.getState().addHighlightGroup(noteId, { paperId: input.paper.id, segments: target.segments });
+    const made = useNotesStore.getState().addHighlightGroup(noteId, { paperId: input.paper.id, segments: target.segments, ...(input.style === "bold" || input.style === "circle" ? { mark: input.style } : {}) });
     if (!made) { if (!had) useNotesStore.getState().remove(noteId); return null; }
+    if (!made.created && input.style) useNotesStore.getState().setHighlightStyle(noteId, made.id, input.style);
     const top = target.measure?.()?.bounds.top ?? target.bounds.top;
     if (typeof window !== "undefined") window.getSelection()?.removeAllRanges();
-    useHighlightStrip.getState().show(made.id, top);
+    if (!input.style || input.style === "highlight") useHighlightStrip.getState().show(made.id, top);
+    else useHighlightStrip.getState().hide();
     return made;
   }
   // P11-28: a block of the page — the words and the hint are the block's, read now; its id is the one the selection reported.
@@ -126,15 +130,18 @@ export function highlightSelection(
     paragraphText,
     hint: page ? page.hint : target.offset,
     colour: DEFAULT_HIGHLIGHT_COLOUR,
+    ...(input.style === "bold" || input.style === "circle" ? { mark: input.style } : {}),
   });
   if (!made) {
     if (!had) useNotesStore.getState().remove(noteId);
     return null;
   }
+  if (!made.created && input.style) useNotesStore.getState().setHighlightStyle(noteId, made.id, input.style);
   // The selection's own line is measured before the selection is cleared: `measure` reads the live range.
   const top = target.measure?.()?.bounds.top ?? target.bounds.top;
   if (typeof window !== "undefined") window.getSelection()?.removeAllRanges();
-  useHighlightStrip.getState().show(made.id, top);
+  if (!input.style || input.style === "highlight") useHighlightStrip.getState().show(made.id, top);
+  else useHighlightStrip.getState().hide();
   return made;
 }
 
@@ -152,10 +159,10 @@ export function useHighlight({
   /** The paper's body as the page renders it. */
   body?: readonly { paragraphs: readonly string[] }[];
   onUnavailable?: (reason: string) => void;
-}): (target: HighlightTarget) => void {
+}): (target: HighlightTarget, style?: ReadingMarkStyle) => void {
   return useCallback(
-    (target: HighlightTarget) => {
-      if (!highlightSelection(target, { paper, questions, forYourQuestions, body })) onUnavailable?.(target.unavailableReason ?? "This selection changed. Select the text again.");
+    (target: HighlightTarget, style?: ReadingMarkStyle) => {
+      if (!highlightSelection(target, { paper, questions, forYourQuestions, body, style })) onUnavailable?.(target.unavailableReason ?? "This selection changed. Select the text again.");
     },
     [paper, questions, forYourQuestions, body, onUnavailable],
   );

@@ -66,6 +66,9 @@ import {
 import { SupabaseDashboardDeliveryLedger, type DashboardDeliveryLedger, type PaperIdentity } from "./delivery-ledger";
 import type { DashboardPrepareJob } from "./prepare-job-repository";
 import type { PrepareBuildOutcome } from "./prepare-worker";
+import { resolveSeedPool } from "@/lib/seed-pool/server";
+import { seedOutputContext } from "@/lib/seed-pool/output";
+import { createTrustedPaperCacheScope } from "@/lib/opportunities/private-paper-cache";
 
 type AdminClient = ReturnType<typeof createAdminClient>;
 
@@ -78,7 +81,7 @@ type AdminClient = ReturnType<typeof createAdminClient>;
 // queries (due-selection, fresh-intent re-read) reuse this single copy
 // rather than a third one.
 export const PROFILE_COLUMNS =
-  "user_id, display_name, research_topics, preferred_methods, current_project, current_challenges, disliked_topics, preference_ledger, feed_focus, feed_freshness, paper_count, feed_source_mix, feed_importance, feed_method_mode, feed_discovery_mode, feed_avoid_reviews, feed_avoid_old_papers, feed_avoid_broad_surveys, digest_enabled, digest_hour_local, digest_timezone, digest_channel, digest_frequency, digest_email";
+  "user_id, display_name, research_topics, preferred_methods, current_project, current_challenges, disliked_topics, preference_ledger, feed_intent, feed_focus, feed_freshness, paper_count, feed_source_mix, feed_importance, feed_method_mode, feed_discovery_mode, feed_avoid_reviews, feed_avoid_old_papers, feed_avoid_broad_surveys, digest_enabled, digest_hour_local, digest_timezone, digest_channel, digest_frequency, digest_email";
 
 export interface PrepareAheadBuildPoolDeps {
   admin?: AdminClient;
@@ -123,6 +126,9 @@ export function createPrepareAheadBuildPool(
     const normalized = digestFeedRequestFromProfile(row);
     if (!normalized.ok) return { ok: false, error: normalized.reason };
 
+    const seedContext = seedOutputContext(await resolveSeedPool(job.ownerId, { targetLocalDate: job.localDate, now: now() }), job.localDate);
+    if (seedContext.kind === "unavailable") return { ok: false, error: "seed_pool_unavailable" };
+
     const exclusionRead = await ledger.readExclusions(job.ownerId);
     if (exclusionRead.status === "unavailable") {
       return { ok: false, error: "ledger_unavailable" };
@@ -138,8 +144,10 @@ export function createPrepareAheadBuildPool(
           controls: feedControlsFromRow(row),
           // P8 -- borrows dispatch-digests/route.ts's own "D9" rationale.
           aiTier: 0,
+          ...(seedContext.kind === "ready" ? { paperCacheScope: createTrustedPaperCacheScope({ ownerId: job.ownerId, topics: normalized.request.topics, methods: normalized.request.methods, project: normalized.request.project, challenge: normalized.request.challenge, intent: normalized.request.intent, aiTier: 0 }) } : {}),
         },
         {
+          ...(seedContext.kind === "ready" ? { seedSnapshot: seedContext.snapshot ?? undefined, seedPoolVersion: seedContext.version, seedRevocationGeneration: seedContext.revocationGeneration, seedTargetLocalDate: seedContext.localDate } : {}),
           ledgerExclusions: exclusionRead.keys,
           now: now(),
           // P6 -- explicit, deliberate empty arrays, not an omission.
@@ -151,7 +159,7 @@ export function createPrepareAheadBuildPool(
         const identity = identityForRawItem(item);
         return { key: identity.key, aliases: identity.aliases };
       });
-      return { ok: true, papers, servedItems: result.items };
+      return { ok: true, papers, servedItems: result.items, seedContext };
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }

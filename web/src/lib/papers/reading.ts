@@ -15,7 +15,8 @@
 
 import type { Paper } from "@/types";
 import { FIGURE_EXTRACTION_REVISION } from "@/lib/figures/figure-revision";
-import type { ExtractedFigureCaption } from "./html-text";
+import { fingerprintReadingSource } from "./reading-source";
+import type { ExtractedFigureCaption, ExtractedTable } from "./html-text";
 import type { ExtractedDocument } from "./html-text";
 import type { FullTextResult } from "./full-text";
 import type { SourceLink } from "./source-links";
@@ -107,7 +108,7 @@ export interface ReadingProvenance {
    * is a fact about the moment: the route answers it when its wait ended first, the page asks again, and it
    * is never kept — see `full-text-pending.ts`.
    */
-  fullText: "none" | "pending" | "html" | "pdf" | "pdf_unreadable_here" | "pdf_empty" | "paywalled";
+  fullText: "none" | "pending" | "html" | "pdf" | "pdf_unreadable_here" | "pdf_empty" | "paywalled" | "blocked";
   /** "arXiv HTML" | "Zenodo PDF" | "PMC" | "publisher page" … */
   sourceLabel?: string;
   /** PDFs only. */
@@ -115,6 +116,7 @@ export interface ReadingProvenance {
   /** Canonical buckets present, document order. */
   buckets: string[];
   paywallHost?: string;
+  blockedHost?: string;
 }
 
 export type ReadingSourceLabel =
@@ -168,7 +170,8 @@ export interface PaperReading {
    * map. Read again once.
    */
   // P12-28: discard derived figure URLs and dimensions made by the old caption pairing.
-  version: 18;
+  version: 20;
+  sourceFingerprint?: string;
   paperId: string;
   builtAt: string;
   provenance: ReadingProvenance;
@@ -219,6 +222,7 @@ export interface ReadingSection {
   /** The paper's display equations in this section, each after the
    *  paragraph it followed on the page. Absent when the section has none. */
   equations?: ReadingEquation[];
+  codeBlocks?: { text: string; language?: string; after: number }[];
 }
 
 /**
@@ -241,6 +245,7 @@ export interface ReadingEquation {
  * it comes into view, and shows the caption alone if there is none.
  */
 export interface ReadingFigure {
+  table?: ExtractedTable;
   ordinal: number;
   /** "Figure 3" */
   label: string;
@@ -514,13 +519,14 @@ function hostOf(url: string): string | undefined {
 
 /** The host that blocked the full text, from the attempt that hit the wall. */
 function paywallHostOf(fullText: FullTextResult): string | undefined {
-  const blocked = fullText.attempts.find((attempt) =>
+  const blocked = [...fullText.attempts].reverse().find((attempt) =>
     attempt.outcome.startsWith("paywalled"),
   );
-  if (blocked) return hostOf(blocked.link.url);
-  // `paywallReason` opens with the host when it knew one.
+  if (blocked?.finalUrl) return hostOf(blocked.finalUrl);
+  // Older results may have only the final host in the reason.
   const match = fullText.reason?.match(/^([\w.-]+\.[a-z]{2,}) requires\b/i);
-  return match?.[1];
+  if (match) return match[1].replace(/^www\./i, "");
+  return blocked ? hostOf(blocked.link.url) : undefined;
 }
 
 /**
@@ -586,6 +592,15 @@ function buildProvenance(
     if (host) base.paywallHost = host;
     return base;
   }
+  const blocked = fullText.status === "source_unavailable" && fullText.attempts.find((attempt) =>
+    /^source_unavailable: .* blocked this request/i.test(attempt.outcome),
+  );
+  if (blocked) {
+    base.fullText = "blocked";
+    const finalUrl = (blocked as typeof blocked & { finalUrl?: string }).finalUrl;
+    base.blockedHost = hostOf(finalUrl ?? blocked.link.url);
+    return base;
+  }
   if (pdfUnreadableHere(fullText)) base.fullText = "pdf_unreadable_here";
   else if (pdfHasNoText(fullText)) base.fullText = "pdf_empty";
   return base;
@@ -621,12 +636,13 @@ export { readableSections, sectionParagraphs } from "./reading-map";
 
 /** The document, split into paragraphs for the page. */
 function readableBody(sections: ReturnType<typeof readableSections>): ReadingSection[] {
-  return sections.map(({ id, section, paragraphs, equations }) => ({
+  return sections.map(({ id, section, paragraphs, equations, codeBlocks }) => ({
     id,
     heading: section.heading,
     canonical: section.canonical,
     paragraphs,
     ...(equations.length > 0 ? { equations } : {}),
+    ...(codeBlocks?.length ? { codeBlocks } : {}),
   }));
 }
 
@@ -719,18 +735,21 @@ export function placeFigures(
 
   const seen = new Set<string>();
   for (const c of captions) {
-    if (!/^(?:extended\s+data\s+)?fig/i.test(c.label)) continue;
+    const isTable = /^table/i.test(c.label);
+    if (!/^(?:extended\s+data\s+)?fig/i.test(c.label) && !(isTable && c.table)) continue;
     if (seen.has(c.label)) continue;
     seen.add(c.label);
 
     let at: { section: number; after: number } | null = null;
-    const named = figureNumber(c.label);
-    if (named !== null) {
+    const named = isTable ? null : figureNumber(c.label);
+    const tableNumber = isTable ? c.label.match(/\d+/)?.[0] : undefined;
+    const tableMention = tableNumber ? new RegExp(`\\btab(?:le|s?\\.)?\\s*${tableNumber}(?![\\d.])`, "i") : null;
+    if (named !== null || tableMention !== null) {
       // P12-56 (R14a): the paragraph that first names THIS numbering's figure: "Extended Data Fig. 3" is not
       // a mention of "Fig. 3", nor "Supplementary Fig. 3" or "Fig. S3" (a figure the PDF does not print).
       outer: for (let si = 0; si < out.length; si++) {
         for (let pi = 0; pi < out[si].paragraphs.length; pi++) {
-          if (cites(out[si].paragraphs[pi], named.space, named.n)) {
+          if (named ? cites(out[si].paragraphs[pi], named.space, named.n) : tableMention?.test(out[si].paragraphs[pi])) {
             at = { section: si, after: pi };
             break outer;
           }
@@ -755,6 +774,7 @@ export function placeFigures(
       figure.width = c.width;
       figure.height = c.height;
     }
+    if (c.table) figure.table = c.table;
     if (c.imageUrl) figure.imageUrl = c.imageUrl;
     else if (pdf && typeof c.page === "number") {
       const pictureOf = pictureNumber(c.label);
@@ -848,7 +868,8 @@ export function buildReading(
   omitted.push({ block: "nextStep", reason: "needs_key" });
 
   return {
-    version: 18,
+    version: 20,
+    sourceFingerprint: fingerprintReadingSource(paper),
     paperId: paper.id,
     builtAt: now.toISOString(),
     provenance,
@@ -881,7 +902,7 @@ export function omittedForReader(
       return { ...entry, reason: "no_profile" };
     }
     if (
-      report?.basis === "model-abstract" &&
+      report?.basis === "model-abstract" && reading.provenance.abstract !== "none" &&
       (entry.block === "caveats" || entry.block === "nextStep")
     ) {
       return { ...entry, reason: "needs_full_text" };
@@ -937,9 +958,9 @@ function capitalize(text: string): string {
 }
 
 const NO_ABSTRACT =
-  "No abstract is published where Peer can read it — only the record. Open it at the source to judge it.";
+  "Peer could not retrieve an abstract — only the record. Open it at the source to judge it.";
 const NO_ABSTRACT_TLDR =
-  "No abstract is published where Peer can read it. The one-line TLDR above is Semantic Scholar's, not the authors'.";
+  "Peer could not retrieve an abstract. The one-line TLDR above is Semantic Scholar's, not the authors'.";
 const PROFILE_EMPTY =
   "Add your current project in Profile and Peer will relate this paper to it.";
 const MODEL_FAILED =
@@ -959,18 +980,27 @@ function presentSentence(reading: PaperReading): string {
 }
 
 /**
+ * What the model-only blocks wait on: a key, or — for a reader who saved a key
+ * but is signed out, whose key Peer does not use (`aiAvailability`) — a sign-in.
+ */
+function keyNeed(keyNeedsSignIn: boolean): string {
+  return keyNeedsSignIn ? "you to sign in" : "a key";
+}
+
+/**
  * "What it means for your project and a next step need a key." At the
  * abstract tier a next step needs the full text as well, so only the block a
- * key alone unlocks is named there.
+ * key alone unlocks is named there. With a key saved and the reader signed
+ * out: "… need you to sign in."
  */
-function keyClause(reading: PaperReading, sectionsRead: boolean): string {
+function keyClause(reading: PaperReading, sectionsRead: boolean, keyNeedsSignIn: boolean): string {
   const blocks = reading.omitted
     .filter((entry) => entry.reason === "needs_key")
     .map((entry) => entry.block)
     .filter((block) => sectionsRead || block === "forYou");
   if (blocks.length === 0) return "";
   const verb = blocks.length > 1 ? "need" : "needs";
-  return `${capitalize(joinList(blocks.map((block) => BLOCK_PHRASE[block])))} ${verb} a key.`;
+  return `${capitalize(joinList(blocks.map((block) => BLOCK_PHRASE[block])))} ${verb} ${keyNeed(keyNeedsSignIn)}.`;
 }
 
 function sourcePhrase(provenance: ReadingProvenance): string {
@@ -980,19 +1010,33 @@ function sourcePhrase(provenance: ReadingProvenance): string {
   return provenance.sourceLabel ?? "the full text";
 }
 
+/** The sentence about what Peer read, and whether it asks the reader for a key or a sign-in. */
+interface ReadingSentence {
+  sentence: string;
+  /** It names a key (or, for a reader with a key who is signed out, a sign-in): the page's link may follow it. */
+  asksForKey: boolean;
+}
+
 /** The sentence about what Peer read, with no model in the picture. */
-function readingSentence(reading: PaperReading, providerConfigured: boolean): string {
+function readingSentence(reading: PaperReading, providerConfigured: boolean, keyNeedsSignIn: boolean): ReadingSentence {
   const { provenance } = reading;
   const sectionsRead = provenance.fullText === "html" || provenance.fullText === "pdf";
+  const plain = (sentence: string): ReadingSentence => ({ sentence, asksForKey: false });
 
+  if (provenance.fullText === "blocked") {
+    const host = provenance.blockedHost ?? "The source";
+    const lead = provenance.abstract === "none" ? "No abstract is available. " : "Abstract only. ";
+    return plain(`${lead}${host} blocked this request, so Peer could not read the full paper.`);
+  }
   if (provenance.abstract === "none" && !sectionsRead) {
-    return provenance.tldr ? NO_ABSTRACT_TLDR : NO_ABSTRACT;
+    return plain(provenance.tldr ? NO_ABSTRACT_TLDR : NO_ABSTRACT);
   }
 
   // A configured key means the model, not the reader, is what the missing
   // blocks wait on; the model's own sentence takes over once it answers.
-  const key = providerConfigured ? "" : keyClause(reading, sectionsRead);
-  const withKey = (sentence: string) => (key ? `${sentence} ${key}` : sentence);
+  const key = providerConfigured ? "" : keyClause(reading, sectionsRead, keyNeedsSignIn);
+  const withKey = (sentence: string): ReadingSentence =>
+    key ? { sentence: `${sentence} ${key}`, asksForKey: true } : plain(sentence);
 
   if (sectionsRead) {
     const qualifier = provenance.buckets.includes("limitations")
@@ -1002,7 +1046,7 @@ function readingSentence(reading: PaperReading, providerConfigured: boolean): st
         : " with no methods section";
     const lead =
       provenance.abstract === "none"
-        ? "No abstract is published where Peer can read it, but the full text was:"
+        ? "Peer could not retrieve an abstract, but the full text was:"
         : "Full text read:";
     return withKey(`${lead} ${sourcePhrase(provenance)}${qualifier}. ${presentSentence(reading)}`);
   }
@@ -1010,7 +1054,7 @@ function readingSentence(reading: PaperReading, providerConfigured: boolean): st
     return withKey("Abstract only; the PDF carries no text to read — it looks scanned.");
   }
   if (provenance.fullText === "pdf_empty") {
-    return PDF_NO_TEXT_MESSAGE;
+    return plain(PDF_NO_TEXT_MESSAGE);
   }
   if (provenance.fullText === "paywalled") {
     const host = provenance.paywallHost ?? "the publisher";
@@ -1022,15 +1066,22 @@ function readingSentence(reading: PaperReading, providerConfigured: boolean): st
   const needFullText = reading.omitted
     .filter((entry) => entry.reason === "not_in_abstract" && entry.block !== "findings")
     .map((entry) => BLOCK_PHRASE[entry.block]);
-  if (providerConfigured) {
-    return needFullText.length > 0
+  const fullTextSentence =
+    needFullText.length > 0
       ? `Abstract only. ${capitalize(joinList(needFullText))} need the full text.`
       : "Abstract only.";
-  }
+  if (providerConfigured) return plain(fullTextSentence);
+  // A key saved and the reader signed out: a sign-in brings only what the model
+  // adds to the abstract, not the full text, so each need is named with its own
+  // cause — the signed-in sentence, then the key clause ("… needs you to sign in.").
+  if (keyNeedsSignIn) return withKey(fullTextSentence);
   const needKey = reading.omitted
     .filter((entry) => entry.reason === "needs_key" && entry.block === "forYou")
     .map((entry) => BLOCK_PHRASE[entry.block]);
-  return `Abstract only. ${capitalize(joinList([...needFullText, ...needKey]))} need the full text and a key.`;
+  return {
+    sentence: `Abstract only. ${capitalize(joinList([...needFullText, ...needKey]))} need the full text and ${keyNeed(keyNeedsSignIn)}.`,
+    asksForKey: true,
+  };
 }
 
 /** Map a report's `sourceKind` to the same names the reading uses. */
@@ -1063,6 +1114,9 @@ function fullTextClause(reading: PaperReading, report: AvailabilityReport): stri
   if (!report.deepRequested) {
     return " Caveats and a next step need the full text — turn on deep reports in Profile.";
   }
+  if (provenance.fullText === "blocked") {
+    return ` Caveats and a next step need the full text; ${provenance.blockedHost ?? "the source"} blocked this request.`;
+  }
   if (provenance.fullText === "paywalled") {
     const host = provenance.paywallHost ?? "the publisher";
     return ` Caveats and a next step need the full text — ${host} keeps it behind access.`;
@@ -1081,7 +1135,9 @@ function fullTextClause(reading: PaperReading, report: AvailabilityReport): stri
 
 function modelSentence(reading: PaperReading, report: AvailabilityReport): string {
   let sentence: string;
-  if (report.basis === "model-abstract") {
+  if (report.basis === "model-abstract" && reading.provenance.abstract === "none") {
+    sentence = "The abstract is unavailable, so Peer cannot verify that this report was read from it.";
+  } else if (report.basis === "model-abstract") {
     sentence =
       "Read by your model from the abstract; every claim below carries a sentence from it.";
     if (reading.caveats.length === 0) sentence += fullTextClause(reading, report);
@@ -1108,23 +1164,44 @@ function modelSentence(reading: PaperReading, report: AvailabilityReport): strin
  * read (or what the model read), then, when a model answered, whether a
  * project is set. The page joins them; it never adds a sentence of its own.
  * `report` is null when there is no model layer — including a `noLlm` report.
+ * `keyNeedsSignIn`: the reader has a key saved but is signed out, so Peer does
+ * not use it (`aiAvailability`) and the model-only blocks wait on a sign-in,
+ * not on a key. Absent or false, every sentence is as it was.
  */
-export function describeAvailability(input: {
-  reading: PaperReading;
-  report: AvailabilityReport | null;
-  providerConfigured: boolean;
-  profileHasProject: boolean;
-  modelFailed: boolean;
-}): string[] {
-  const { reading, report, providerConfigured, profileHasProject, modelFailed } = input;
+export function describeAvailability(input: AvailabilityInput): string[] {
+  const { reading, report, providerConfigured, profileHasProject, modelFailed, keyNeedsSignIn = false } = input;
   if (report) {
     const out = [modelSentence(reading, report)];
     if (!profileHasProject) out.push(PROFILE_EMPTY);
     return out;
   }
-  const out = [readingSentence(reading, providerConfigured)];
+  const out = [readingSentence(reading, providerConfigured, keyNeedsSignIn).sentence];
   if (modelFailed) out.push(MODEL_FAILED);
   return out;
+}
+
+/** What `describeAvailability` reads. */
+export interface AvailabilityInput {
+  reading: PaperReading;
+  report: AvailabilityReport | null;
+  providerConfigured: boolean;
+  profileHasProject: boolean;
+  modelFailed: boolean;
+  keyNeedsSignIn?: boolean;
+}
+
+/**
+ * Whether the sentence `describeAvailability` writes for this input names a
+ * key, or a sign-in — the only case where the page's "Add a key" / "Sign in"
+ * link follows it. Read from the same function that writes the sentence, so a
+ * sentence that asks for neither (no abstract; a PDF with no text; a model on
+ * the page) never carries the link.
+ */
+export function availabilityAsksForKey(
+  input: Pick<AvailabilityInput, "reading" | "report" | "providerConfigured" | "keyNeedsSignIn">,
+): boolean {
+  if (input.report) return false;
+  return readingSentence(input.reading, input.providerConfigured, input.keyNeedsSignIn ?? false).asksForKey;
 }
 
 const SMALL_WORDS = new Set(["and", "or", "of", "the", "in", "for", "on", "to", "a", "an", "with", "by"]);

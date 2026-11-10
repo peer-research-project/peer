@@ -114,29 +114,28 @@ describe("a press on the edge tab on a phone goes to the notes page (P12-77 rule
     const tree = await mountButton("edge", [false]);
 
     expect(log.opened).toEqual(["page"]);
-    expect(viewOf(tree).props).toMatchObject({ variant: "edge", shown: false, beside: false });
+    expect(viewOf(tree).props).toMatchObject({ variant: "edge", beside: false });
     expect(elements(tree).some((el) => el.type === NotesWindow)).toBe(false);
   });
 
-  it("from md the press opens the window, as it always did, and the tab stands beside it", async () => {
+  it("from md the press opens the standalone notes page", async () => {
     const tree = await mountButton("edge", [true]);
 
-    expect(log.opened).toEqual(["window"]);
-    expect(viewOf(tree).props).toMatchObject({ shown: true, beside: true });
-    expect(elements(tree).some((el) => el.type === NotesWindow)).toBe(true);
+    expect(log.opened).toEqual(["page"]);
+    expect(viewOf(tree).props).toMatchObject({ beside: false });
+    expect(elements(tree).some((el) => el.type === NotesWindow)).toBe(false);
   });
 
-  it("is decided at the press: a window that was wide and is now narrow answers for what it is now", async () => {
+  it("opens the standalone notes page across width changes", async () => {
     await mountButton("edge", [true, false]);
 
-    // the first press opened the window; the second closes it (the tab is its toggle) whatever the width is now
-    expect(log.opened).toEqual(["window"]);
+    expect(log.opened).toEqual(["page", "page"]);
     log.opened = [];
     await mountButton("edge", [false, false]);
     expect(log.opened).toEqual(["page", "page"]);
     log.opened = [];
     await mountButton("edge", [false, true]);
-    expect(log.opened).toEqual(["page", "window"]);
+    expect(log.opened).toEqual(["page", "page"]);
   });
 
   it("asks Tailwind's md, 48rem — where the legend, the masthead and the margin begin — and nothing else", async () => {
@@ -152,7 +151,7 @@ describe("a press on the edge tab on a phone goes to the notes page (P12-77 rule
 
     expect(log.opened).toEqual(["page", "page"]);
     expect(log.queries).toEqual([]);
-    expect(viewOf(tree).props).toMatchObject({ variant: "row", shown: false, beside: false });
+    expect(viewOf(tree).props).toMatchObject({ variant: "row", beside: false });
   });
 
   it("with no window to ask (the server, a test) it is the wide screen's answer: the window", () => {
@@ -317,19 +316,13 @@ describe("a card standing in the bottom band, at any width: the tab keeps the ri
     }
   });
 
-  it.each(BANDED)("%i x %i at step %f: the notes window shown from the tab is a card in the band too — same place, even before it registers in the stack", async (width, height, step) => {
+  it.each(BANDED)("%i x %i at step %f: the tab opens the notes page without creating a floating card", async (width, height, step) => {
     log.wide = wideAt(width);
-    const band = registeredAt(width, height, step);
-    useMarginStore.setState({ rect: band });
-    // one press from md opens the window (`shown`); the hook runtime mounts no `NotesWindow`, so nothing is in the stack yet (the frame before it registers)
+    useMarginStore.setState({ rect: registeredAt(width, height, step) });
     const tree = await mountButton("edge", [true]);
-    const html = markupOf(tree);
-
-    expect(log.opened).toEqual(["window"]);
-    expect(viewOf(tree).props).toMatchObject({ shown: true, beside: false, bandTop: band.top });
-    expect(classesOf(html)).toContain("right-0");
-    expect(html).not.toContain("left:");
-    expect(html).toContain(`--tab-band-top:${band.top}px`);
+    expect(log.opened).toEqual(["page"]);
+    expect(viewOf(tree).props).toMatchObject({ beside: false });
+    expect(elements(tree).some((el) => el.type === NotesWindow)).toBe(false);
   });
 
   it.each(BANDED)("%i x %i at step %f: with no card standing the band is not written and the tab is on the right edge, as it always was", async (width, height, step) => {

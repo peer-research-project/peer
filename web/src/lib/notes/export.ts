@@ -120,7 +120,12 @@ function blockMarkdown(b: Block, blocks: Block[], i: number, sources: Record<str
       // written with the dialect's escapes (`\*`, `\_`, `\=`), so the words come back as one mark and a renderer reads them the same.
       const words = highlightWords(b);
       const spot = readHighlight(b);
-      return words === null || !spot ? null : highlightSegments(spot).map((segment) => `${segment.kind === "heading" ? "### " : ""}==${segment.quote.replace(/\s+/g, " ").trim().replace(/[*_=]/g, "\\$&")}==`).join("\n\n");
+      if (words === null || !spot) return null;
+      return highlightSegments(spot).map((segment) => {
+        const escaped = segment.quote.replace(/\s+/g, " ").trim().replace(/[*_=]/g, "\\$&");
+        const marked = spot.mark === "bold" ? `**${escaped}**` : spot.mark === "circle" ? `◯ ${escaped}` : `==${escaped}==`;
+        return `${segment.kind === "heading" ? "### " : ""}${marked}`;
+      }).join("\n\n");
     }
   }
 }
@@ -367,7 +372,9 @@ function bodyHtml(note: Note): string {
         const words = highlightWords(b);
         if (spot && words) for (const segment of highlightSegments(spot)) {
           const tag = segment.kind === "heading" ? "h3" : "p";
-          out.push(`<${tag}><mark style="${highlightStyle(spot.colour)}">${esc(segment.quote.replace(/\s+/g, " ").trim())}</mark></${tag}>\n`);
+          const text = esc(segment.quote.replace(/\s+/g, " ").trim());
+          const marked = spot.mark === "bold" ? `<strong>${text}</strong>` : spot.mark === "circle" ? `<span style="border:1px solid #8064a2;border-radius:1em;padding:0 0.15em">${text}</span>` : `<mark style="${highlightStyle(spot.colour)}">${text}</mark>`;
+          out.push(`<${tag}>${marked}</${tag}>\n`);
         }
         break;
       }

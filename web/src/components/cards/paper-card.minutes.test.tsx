@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildReading } from "@/lib/papers/reading";
-import { buildReadingKey, rememberReading } from "@/components/reader/use-reading";
+import { buildReadingKey, fingerprintReadingSource, rememberReading, READING_CACHE_KEY, READING_CACHE_TTL_MS, READING_VERSION } from "@/components/reader/use-reading";
 import type { Paper } from "@/types";
 import { PaperCard, bodyMinutesOf, cardMinutes } from "./paper-card";
 
@@ -40,7 +40,7 @@ const other: Paper = { ...upload, id: "upload:fedcba9876543210" };
 
 function cachedWithTotal(paper: Paper, totalMinutes: number | undefined) {
   const reading = buildReading(paper, null);
-  rememberReading(buildReadingKey(paper.id, paper.fullTextUploadId, paper.revision), {
+  rememberReading(buildReadingKey(paper.id, paper.fullTextUploadId, paper.revision, fingerprintReadingSource(paper)), {
     ...reading,
     map: totalMinutes === undefined ? undefined : { sections: [], totalMinutes },
   });
@@ -60,6 +60,8 @@ describe("the Saved card's minutes are the paper's when its body is known (P10-1
     cachedWithTotal(upload, 50);
     expect(bodyMinutesOf(upload)).toBe(50);
     expect(cardMinutes(upload, bodyMinutesOf(upload))).toBe(50);
+    // A different current source must not inherit this cached body's duration.
+    expect(bodyMinutesOf({ ...upload, summaryIntro: "A different source record." })).toBeNull();
     // Another paper's reading is not this paper's.
     expect(bodyMinutesOf(other)).toBeNull();
     expect(cardMinutes(other, bodyMinutesOf(other))).toBe(1);
@@ -71,9 +73,30 @@ describe("the Saved card's minutes are the paper's when its body is known (P10-1
     cachedWithTotal(upload, 0);
     expect(bodyMinutesOf(upload)).toBeNull();
     const broken = memoryStorage();
-    broken.setItem("peer-reading-v2", "{not json");
+    broken.setItem("peer-reading-v4", "{not json");
     expect(bodyMinutesOf(upload, broken)).toBeNull();
     expect(bodyMinutesOf(upload, { getItem: () => { throw new Error("blocked"); } })).toBeNull();
+  });
+
+  it("rejects legacy, unkeyed, mismatched, wrong-version and expired readings", () => {
+    const source = fingerprintReadingSource(upload);
+    const currentKey = buildReadingKey(upload.id, upload.fullTextUploadId, upload.revision, source);
+    const oldKey = buildReadingKey(upload.id, upload.fullTextUploadId, upload.revision);
+    const reading = { ...buildReading(upload, null), map: { sections: [], totalMinutes: 50 } };
+    const entry = { reading, ts: Date.now() };
+    const storage = memoryStorage();
+    storage.setItem("peer-reading-v2", JSON.stringify({ [oldKey]: entry }));
+    expect(bodyMinutesOf(upload, storage)).toBeNull();
+    storage.setItem(READING_CACHE_KEY, JSON.stringify({ [oldKey]: entry }));
+    expect(bodyMinutesOf(upload, storage)).toBeNull();
+    storage.setItem(READING_CACHE_KEY, JSON.stringify({ [currentKey]: { ...entry, reading: { ...reading, sourceFingerprint: "different" } } }));
+    expect(bodyMinutesOf(upload, storage)).toBeNull();
+    storage.setItem(READING_CACHE_KEY, JSON.stringify({ [currentKey]: { ...entry, reading: { ...reading, version: READING_VERSION - 1 } } }));
+    expect(bodyMinutesOf(upload, storage)).toBeNull();
+    storage.setItem(READING_CACHE_KEY, JSON.stringify({ [currentKey]: { ...entry, ts: Date.now() - READING_CACHE_TTL_MS } }));
+    expect(bodyMinutesOf(upload, storage)).toBeNull();
+    storage.setItem(READING_CACHE_KEY, JSON.stringify({ [currentKey]: entry }));
+    expect(bodyMinutesOf(upload, storage)).toBe(50);
   });
 
   it("the first render (the server's, and a hydrating client's) shows the summary's minutes and never reads storage", () => {

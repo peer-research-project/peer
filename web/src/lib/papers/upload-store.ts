@@ -62,12 +62,12 @@ export function isValidHash16(value: string): boolean {
 
 export function pdfPath(hash16: string): string {
   if (!isValidHash16(hash16)) throw new Error("Invalid upload id");
-  return path.join(UPLOAD_DIR, `${hash16}.pdf`);
+  return path.join(/*turbopackIgnore: true*/ UPLOAD_DIR, `${hash16}.pdf`);
 }
 
 export function metaPath(hash16: string): string {
   if (!isValidHash16(hash16)) throw new Error("Invalid upload id");
-  return path.join(UPLOAD_DIR, `${hash16}.json`);
+  return path.join(/*turbopackIgnore: true*/ UPLOAD_DIR, `${hash16}.json`);
 }
 
 function pdfName(hash16: string): string {
@@ -88,7 +88,7 @@ function docName(hash16: string): string {
 
 /** P0-02: where the sidecar sits when the backend is the disk. */
 export function docPath(hash16: string): string {
-  return path.join(UPLOAD_DIR, docName(hash16));
+  return path.join(/*turbopackIgnore: true*/ UPLOAD_DIR, docName(hash16));
 }
 
 /** Owner keys are sha256 hex; nothing else ever becomes a folder name. */
@@ -440,7 +440,7 @@ export async function writeUploadDoc(hash16: string, key: string, doc: Extracted
   const temporary = `${name}.${randomUUID()}.tmp`;
   try {
     await backend.write(temporary, payload, "application/json");
-    await rename(path.join(UPLOAD_DIR, temporary), docPath(hash16));
+    await rename(path.join(/*turbopackIgnore: true*/ UPLOAD_DIR, temporary), docPath(hash16));
   } catch (error) {
     await backend.remove([temporary]).catch(() => undefined);
     throw error;
@@ -572,7 +572,7 @@ async function writeKeptObject(object: string, payload: Buffer, contentType: str
   const temporary = `${object}.${randomUUID()}.tmp`;
   try {
     await backend.write(temporary, payload, contentType);
-    await rename(path.join(UPLOAD_DIR, temporary), path.join(UPLOAD_DIR, object));
+    await rename(path.join(/*turbopackIgnore: true*/ UPLOAD_DIR, temporary), path.join(/*turbopackIgnore: true*/ UPLOAD_DIR, object));
   } catch (error) {
     await backend.remove([temporary]).catch(() => undefined);
     throw error;
@@ -617,7 +617,7 @@ export async function removeUploadFigureCuts(hash16: string): Promise<void> {
   const backend = uploadBackend();
   const folder = figureCutFolder(hash16);
   if (backend.kind === "disk") {
-    await rm(path.join(UPLOAD_DIR, folder), { recursive: true, force: true });
+    await rm(path.join(/*turbopackIgnore: true*/ UPLOAD_DIR, folder), { recursive: true, force: true });
     return;
   }
   const objects = await backend.list(folder);

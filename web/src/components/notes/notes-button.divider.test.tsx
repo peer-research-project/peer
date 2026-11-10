@@ -213,11 +213,14 @@ const withCard = (layout: Layout, has: boolean) =>
     : view({ has, beside: false, marginLeft: layout.rect.left, bandTop: layout.rect.top });
 
 describe("the constants this test stands on are what the shell has (P12-89 E5)", () => {
-  it("the margin divider is a 12 px grid track between the centre and the margin: its hit strip ends where the margin cell begins", () => {
+  it("the left divider and single reading column remain while the margin is an overlay anchor", () => {
     const grid = /\.reader-shell \{[^}]*grid-template-columns:\s*([^;]+);/.exec(CSS)?.[1].trim();
 
     expect(DIVIDER_PX).toBe(12);
-    expect(grid).toBe("var(--left-w) 12px minmax(0, 1fr) 12px var(--margin-w, 360px)");
+    expect(grid).toBe("var(--left-w) 12px minmax(0, 1fr)");
+    const shell = read("src/components/reader/reader-shell.tsx");
+    expect(shell).toContain('pane="left"');
+    expect(shell).toContain('className="reader-margin" data-reader-margin="" aria-hidden="true"');
     expect(read("src/components/reader/pane-divider.tsx")).toContain('className="reader-divider"');
   });
 

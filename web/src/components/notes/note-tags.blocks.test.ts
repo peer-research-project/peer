@@ -80,8 +80,8 @@ describe("passageIsLost — a heading's or a caption's note, against the reading
 
 describe("storedBodyOf — the reading kept in this browser keeps its headings and captions", () => {
   it("gives back the sections as stored, headings and figures with them", () => {
-    const entry = { ts: 1_000, reading: { version: READING_VERSION, body: BODY } };
-    const storage = { getItem: () => JSON.stringify({ "p1|key": entry }) };
+    const entry = { ts: 1_000, reading: { version: READING_VERSION, sourceFingerprint: "", body: BODY } };
+    const storage = { getItem: (key: string) => key.startsWith("peer-reading-current-v1:") ? "p1|key" : JSON.stringify({ "p1|key": entry }) };
     const body = storedBodyOf("p1", storage, 2_000);
     expect(body).toEqual(BODY);
     expect(passageIsLost(HEADING, "h1", {}, body)).toBe(false);

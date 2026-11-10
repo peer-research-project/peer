@@ -144,8 +144,11 @@ describe("globals.css — the text steps scale the reading text inside the wrapp
     expect(words).toMatch(/font-reading text-title-lg leading-\[1\.45\]/);
     expect(read("../components/reader/claim-list.tsx")).toMatch(/rv rv-late reading-prose space-y-4 measure-paper/);
     expect(read("../components/reader/quote-list.tsx")).toMatch(/reading-prose space-y-4/);
-    expect(read("../components/reader/lead-claim.tsx")).toMatch(/text-heading text-display-sm/);
-    expect(read("../components/reader/paper-body.tsx")).toMatch(/<figcaption className="annotation mt-2 leading-\[1\.6\] text-text-faint measure-mono">/);
+    expect(read("../components/reader/lead-claim.tsx")).toMatch(/reader-lead-prose font-reading text-heading/);
+    const readerCss = read("../components/reader/paper-body-reading.css");
+    expect(readerCss).toMatch(/\.reader-lead-prose\s*\{[^}]*font-size:\s*calc\(19px\s*\*\s*var\(--reading-scale,\s*1\)\)/);
+    expect(read("../components/reader/paper-body.tsx")).toContain('<figcaption className="reader-visual-caption">');
+    expect(readerCss).toMatch(/\.reader-visual-caption\s*\{[^}]*font:\s*400\s+calc\(15px\s*\*\s*var\(--reading-scale,\s*1\)\)/);
   });
 });
 

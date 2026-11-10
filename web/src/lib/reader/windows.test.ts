@@ -613,7 +613,8 @@ describe("the stack never stands over the selection's buttons (P11-26 rule 5; §
   ];
 
   it("the actions stand at z 70 in their own sources: the selection's three buttons and the highlight strip", () => {
-    expect(read("src/components/reader/selection-toolbar.tsx")).toMatch(/fixed z-\[70\] flex/);
+    expect(read("src/components/reader/selection-toolbar.tsx")).toMatch(/reader-selection-toolbar fixed z-\[70\]/);
+    expect(read("src/components/reader/selection-toolbar.css")).toMatch(/\.reader-selection-toolbar\s*\{[^}]*z-index:\s*70;/);
     expect(read("src/components/notes/highlight-strip.tsx")).toMatch(/fixed z-\[70\] flex/);
     expect(STACK_Z_BASE).toBeLessThan(ACTIONS_Z);
   });

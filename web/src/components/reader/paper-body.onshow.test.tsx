@@ -13,6 +13,7 @@ import { hookRuntime } from "@/test-support/hook-runtime";
 import type { PaperReading } from "@/lib/papers/reading";
 import { anchorTextOnShow, setBodyOnShow } from "@/lib/notes/anchor-blocks";
 import { PaperBody } from "./paper-body";
+import { useLostPassages } from "@/store/notes";
 
 const reading = {
   body: [
@@ -37,4 +38,17 @@ describe("PaperBody — the body on show", () => {
     mounted.unmount();
     expect(anchorTextOnShow("paper-section-0-p1")).toBeUndefined();
   });
+});
+
+
+it("only reports missing passages while a real body is on screen", async () => {
+  useLostPassages.getState().setLost([]);
+  const noteAnchors = { "paper-section-0-p0": [{ id: "note-1", n: 1, start: 0, end: 12, quote: "Absent words" }] };
+  const mounted = await hookRuntime.mount(() => PaperBody({ reading, noteAnchors }));
+  expect(useLostPassages.getState().lost["note-1"]).toBe(true);
+  mounted.unmount();
+  expect(useLostPassages.getState().lost["note-1"]).toBeUndefined();
+  const empty = await hookRuntime.mount(() => PaperBody({ reading: { ...reading, body: [] }, noteAnchors }));
+  expect(useLostPassages.getState().lost["note-1"]).toBeUndefined();
+  empty.unmount();
 });

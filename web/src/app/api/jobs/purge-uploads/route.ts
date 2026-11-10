@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { purgeExpiredUploads } from "@/lib/papers/upload-store";
+import { purgeSeedOrphans } from "@/lib/seed-pool/lifecycle";
 import { PRIVATE_UPLOAD_HEADERS } from "@/lib/papers/upload-access";
 
 export const dynamic = "force-dynamic";
@@ -14,5 +15,6 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: PRIVATE_UPLOAD_HEADERS });
   }
   await purgeExpiredUploads();
+  await purgeSeedOrphans();
   return NextResponse.json({ purged: true }, { headers: PRIVATE_UPLOAD_HEADERS });
 }

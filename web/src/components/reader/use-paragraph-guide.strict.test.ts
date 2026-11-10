@@ -37,7 +37,7 @@ import { hookRuntime } from "@/test-support/hook-runtime";
 import type { Paper } from "@/types";
 import type { ParagraphGuide } from "@/lib/papers/paragraph-guide";
 import { PARAGRAPH_GUIDE_STORAGE_KEY, useParagraphGuide } from "./use-paragraph-guide";
-import { buildReadingKey } from "./use-reading";
+import { buildReadingKey, fingerprintReadingSource } from "./use-reading";
 
 function memoryStorage(): Storage {
   const items = new Map<string, string>();
@@ -112,7 +112,7 @@ describe("useParagraphGuide under React's double effect (StrictMode, P4-00c)", (
     // The one request is the second run's: it was never aborted, and its answer is kept and returned.
     expect(aborted).toEqual([false]);
     expect(gists).toEqual(GISTS);
-    expect(JSON.parse(localStorage.getItem(PARAGRAPH_GUIDE_STORAGE_KEY) ?? "{}")).toHaveProperty(buildReadingKey(paper.id, undefined, undefined));
+    expect(JSON.parse(localStorage.getItem(PARAGRAPH_GUIDE_STORAGE_KEY) ?? "{}")).toHaveProperty(buildReadingKey(paper.id, undefined, undefined, fingerprintReadingSource(paper)));
   });
 
   it("sends nothing from a run that was cleaned up in the tick it started in: mounted, then unmounted", async () => {

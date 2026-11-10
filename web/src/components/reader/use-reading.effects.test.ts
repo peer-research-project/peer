@@ -84,8 +84,8 @@ describe("useReading with effects running — one reading request across two ope
     const second = await open(attached);
 
     expect(fetches).toHaveLength(1);
-    // P8-04: `v` first, so the private request keeps its `upload` parameter after it.
-    expect(fetches[0]).toBe(`/api/papers/openalex%3AW7000000002/reading?v=${READING_VERSION}&upload=upload%3A0123456789abcdef`);
+    // The version and source-fingerprint shape marker both key shared caches; upload still follows.
+    expect(fetches[0]).toBe("/api/papers/openalex%3AW7000000002/reading?v=20&sf=1&upload=upload%3A0123456789abcdef");
     expect(first.fromServer).toBe(true);
     expect(second.fromServer).toBe(true);
     expect(second.reading?.provenance.fullText).toBe("pdf");
@@ -100,7 +100,7 @@ describe("useReading with effects running — one reading request across two ope
     await open(standalone);
     await open(standalone);
     expect(fetches).toHaveLength(1);
-    expect(fetches[0]).toBe(`/api/papers/upload%3Afedcba9876543210/reading?v=${READING_VERSION}`);
+    expect(fetches[0]).toBe("/api/papers/upload%3Afedcba9876543210/reading?v=20&sf=1");
 
     await open({ ...standalone, revision: 2 });
     expect(fetches).toHaveLength(2);
@@ -141,7 +141,7 @@ describe("useReading with effects running — one reading request across two ope
 
     await open(base);
 
-    expect(fetches).toEqual([`/api/papers/openalex%3AW7000000002/reading?v=${READING_VERSION}`]);
+    expect(fetches).toEqual(["/api/papers/openalex%3AW7000000002/reading?v=20&sf=1"]);
     // The number is the one the hook accepts: the version of the reading the page builds.
     expect(fetches[0]).toContain(`?v=${buildReading(base, null).version}`);
   });

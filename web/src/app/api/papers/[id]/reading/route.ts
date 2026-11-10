@@ -11,6 +11,7 @@ import { fetchPaperById } from "@/lib/papers/fetch-by-id";
 import { getFullText, type FullTextResult } from "@/lib/papers/full-text";
 import { buildReading, type PaperReading } from "@/lib/papers/reading";
 import { markFullTextPending } from "@/lib/papers/full-text-pending";
+import { readabilityOf } from "@/lib/papers/readability";
 import { rawItemToPaper } from "@/lib/feed/mapper";
 import { bareUploadId, claimsUploadId, uploadMetaToPaper } from "@/lib/papers/upload-store";
 import { ownedUpload, PRIVATE_UPLOAD_HEADERS } from "@/lib/papers/upload-access";
@@ -81,8 +82,7 @@ export async function GET(
   const decodedId = decodeURIComponent(id);
   const refresh = req.nextUrl.searchParams.get("refresh") === "1";
 
-  // 2-05 (Ruling 4, §1e / bug B): `fetchPaperById` only ever recognizes an
-  // `openalex:`/`arxiv:` prefix and returns null for anything else — an
+  // An
   // uploaded PDF maps straight to a `Paper` (like `uploadMetaToPaper`
   // already does elsewhere), skipping the RawItem shape entirely, rather
   // than teaching `fetchPaperById` a RawItem-shaped lie about an upload.
@@ -128,11 +128,12 @@ export async function GET(
       );
     }
     return NextResponse.json(uploadReading, {
-      headers: PRIVATE_UPLOAD_HEADERS,
+      headers: { ...PRIVATE_UPLOAD_HEADERS, "X-Peer-Readability": uploadFullText.settled ? readabilityOf(uploadFullText.result) : "unknown" },
     });
   }
 
-  const raw = await fetchPaperById(decodedId);
+  const raw = await fetchPaperById(decodedId).catch(() => undefined);
+  if (raw === undefined) return NextResponse.json({ error: "Paper source temporarily unavailable" }, { status: 503, headers: { "Cache-Control": "no-store" } });
   if (!raw) {
     return NextResponse.json(
       { error: "Paper not found" },
@@ -159,7 +160,7 @@ export async function GET(
     // canonical `upload:<hash16>` (`bareUploadId` accepted it), the same id the
     // text was read from. The figure-image route answers it to its owner only.
     return NextResponse.json(buildReading(paper, fullText, new Date(), { figuresFrom: supplement }), {
-      headers: PRIVATE_UPLOAD_HEADERS,
+      headers: { ...PRIVATE_UPLOAD_HEADERS, "X-Peer-Readability": readabilityOf(fullText) },
     });
   }
 
@@ -168,16 +169,17 @@ export async function GET(
       paperId: paper.id,
       url: paper.linkPaper ?? paper.linkArxiv ?? null,
       doi: paper.doi ?? null,
-      arxivId: paper.id.startsWith("arxiv:") ? paper.id.slice("arxiv:".length) : null,
+      arxivId: paper.id.startsWith("arxiv:") ? paper.id.slice("arxiv:".length) : raw.metadata.externalIds?.arxivId ?? null,
       openAlexId: paper.id.startsWith("openalex:")
         ? paper.id.slice("openalex:".length)
-        : null,
+        : raw.metadata.externalIds?.openalexId ?? null,
     },
     FULL_TEXT_TIMEOUT_MS,
   );
 
   const reading = readingFor(paper, fullText);
+  const availability = fullText.settled ? readabilityOf(fullText.result) : "unknown";
   return NextResponse.json(reading, {
-    headers: fullText.settled && !refresh ? CACHE_HEADERS : NO_STORE_HEADERS,
+    headers: { ...(availability !== "unknown" && !refresh && !["transient", "blocked"].includes(paper.abstractRetrieval?.status ?? "") ? CACHE_HEADERS : NO_STORE_HEADERS), "X-Peer-Readability": availability },
   });
 }

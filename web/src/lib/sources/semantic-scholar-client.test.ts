@@ -143,6 +143,28 @@ describe("fetchSemanticScholar — concurrency cap + minimum interval", () => {
     expect(globalThis.fetch).toHaveBeenCalledTimes(4);
   });
 
+  it("respects a caller's zero-retry budget and deadline while queued", async () => {
+    vi.stubEnv("SEMANTIC_SCHOLAR_API_KEY", "test-key");
+    globalThis.fetch = vi.fn(async () => new Response("", { status: 429 })) as unknown as typeof fetch;
+    const first = fetchSemanticScholar("https://api.semanticscholar.org/1", {}, 500, { deadline: Date.now() + 500, maxRetries: 0 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+    expect((await first)?.status).toBe(429);
+    const queued = fetchSemanticScholar("https://api.semanticscholar.org/2", {}, 500, { deadline: Date.now() + 100, maxRetries: 0 });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(await queued).toBeNull();
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retry a 429 when the caller sets zero retries", async () => {
+    globalThis.fetch = vi.fn(async () => new Response("", { status: 429 })) as unknown as typeof fetch;
+    const result = fetchSemanticScholar("https://api.semanticscholar.org/1", {}, 500, { deadline: Date.now() + 5_000, maxRetries: 0 });
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+    expect((await result)?.status).toBe(429);
+  });
+
   it("stops retrying as soon as a retry succeeds", async () => {
     let calls = 0;
     globalThis.fetch = vi.fn(async () => {

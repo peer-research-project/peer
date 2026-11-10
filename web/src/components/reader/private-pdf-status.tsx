@@ -16,9 +16,14 @@ export function PrivatePdfStatus({ upload, onDeleted, attachedToTitle }: {
   const [error, setError] = useState<string | null>(null);
   const forget = useProfileStore((s) => s.forgetUploadPreference);
   const documentKey = upload.uploadDocumentKey;
+  // W11 R-B6: only claim keywords when this upload had readable text and
+  // actually yielded extracted phrases — a blank / no-text-layer PDF has none.
+  const hasKeywords = upload.textStatus !== "empty" && (upload.preferenceSignals?.length ?? 0) > 0;
   return <div className="mt-3 font-sans text-caption text-text-muted">
     {attachedToTitle && <p className="text-text">Attached to: {attachedToTitle}</p>}
-    <p>Private PDF · retained for 30 days after upload · keywords inform your recommendations.</p>
+    <p>{hasKeywords
+      ? "Private PDF · retained for 30 days after upload · keywords inform your recommendations."
+      : "Private PDF · retained for 30 days after upload."}</p>
     {/* P9-23 (A P9-W2's N5): 184 × 16 and 57 × 16 px on a phone. Where there
      * is no hover each action takes the shell's touch rule — 44 px tall, as
      * notes-button.tsx and reader-tabs.tsx — with 8 px between them when the

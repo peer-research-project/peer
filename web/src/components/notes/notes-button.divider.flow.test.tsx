@@ -88,7 +88,6 @@ const STATES: { name: string; windows: FloatingWindow[]; presses?: number }[] = 
   { name: "the explain card", windows: [card(EXPLAIN_WINDOW_ID, "explain", 1)] },
   { name: "a figure", windows: [card("figure", "figure", 1)] },
   { name: "four cards stacked", windows: [card("s1", "sticky", 1), card(EXPLAIN_WINDOW_ID, "explain", 2), card(NOTES_WINDOW_ID, "notes", 3), card("figure", "figure", 4)] },
-  { name: "the notes window shown by the tab's own press", windows: [], presses: 1 },
 ];
 
 const global = globalThis as unknown as Record<string, unknown>;
@@ -184,11 +183,11 @@ describe("NotesButton stands the tab left of the margin divider's strip, in ever
     expect(html).not.toContain("left:");
   });
 
-  it("a second press closes the window, and the tab is back on the window's edge", async () => {
+  it("navigation leaves the tab on the window edge without a floating card", async () => {
     useMarginStore.setState({ rect: marginAt(1024) });
     const tree = await mountButton(2);
 
-    expect(viewOf(tree).props).toMatchObject({ shown: false, beside: false });
+    expect(viewOf(tree).props).toMatchObject({ beside: false });
     expect(classesOf(markupOf(tree))).toContain("right-0");
   });
 });

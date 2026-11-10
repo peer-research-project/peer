@@ -616,8 +616,8 @@ describe("CachedPaperPool.jev — optional record of what Jev did (a reader's Je
  *
  * The single-flight assertion is the one that matters: it is what fails if a
  * later change reaches for the obvious "bypass the cache function" shape, which
- * would let two clicks fire two full builds — two Tavily fan-outs, on the
- * operator's key.
+ * would let two clicks fire two full builds — every source fetch, and at Tier 2
+ * the model rerank, paid twice.
  */
 describe("getOrBuildCachedPool — forced rebuild (R-POOL-2)", () => {
   // RE-AIMED (P9-35), NOT DELETED: the fixtures were a jobs pool under a weekly
@@ -715,4 +715,14 @@ describe("getOrBuildCachedPool — forced rebuild (R-POOL-2)", () => {
 
     expect(builds).toBe(1);
   });
+});
+
+
+it("separates seed versions, revocations, owner-local target dates and owners", () => {
+  const args = { surface: "papers" as const, requiredTopics: ["science"], now: new Date("2026-11-01T23:00:00Z"), paperOwnerId: "owner-a", paperScopeIdentity: "private" };
+  const today = derivePoolCacheKey({ ...args, seedVersion: "v1", seedRevocationGeneration: 0, targetLocalDate: "2026-11-01" });
+  expect(derivePoolCacheKey({ ...args, seedVersion: "v2", seedRevocationGeneration: 0, targetLocalDate: "2026-11-01" })).not.toBe(today);
+  expect(derivePoolCacheKey({ ...args, seedVersion: "v1", seedRevocationGeneration: 1, targetLocalDate: "2026-11-01" })).not.toBe(today);
+  expect(derivePoolCacheKey({ ...args, seedVersion: "v1", seedRevocationGeneration: 0, targetLocalDate: "2026-11-02" })).not.toBe(today);
+  expect(derivePoolCacheKey({ ...args, paperOwnerId: "owner-b", seedVersion: "v1", seedRevocationGeneration: 0, targetLocalDate: "2026-11-01" })).not.toBe(today);
 });

@@ -200,6 +200,10 @@ export interface PoolCacheKeyInput {
    */
   jevScreening?: true;
   now?: Date;
+  /** Server-resolved owner/day seed identity; absent preserves the legacy key. */
+  seedVersion?: string;
+  seedRevocationGeneration?: number;
+  targetLocalDate?: string;
 }
 
 // The papers pool's key version: bump whenever the durable pool payload
@@ -456,7 +460,7 @@ export function derivePoolCacheKey(input: PoolCacheKeyInput): string {
   //
   // The period appears TWICE below — inside the hashed signature and again as a
   // plaintext segment of the returned key — so both read the same `period`.
-  const period = localCalendarDate(input.now);
+  const period = input.targetLocalDate ?? localCalendarDate(input.now);
   const version = PAPER_CACHE_KEY_VERSION;
   const signature = JSON.stringify({
     version,
@@ -472,6 +476,8 @@ export function derivePoolCacheKey(input: PoolCacheKeyInput): string {
     // Only when true: `JSON.stringify` omits `undefined`, so the key of every
     // reader without a Jev key keeps the exact shape it had before this field.
     jevScreening: input.surface === "papers" && input.jevScreening === true ? true : undefined,
+    seedVersion: input.seedVersion,
+    seedRevocationGeneration: input.seedRevocationGeneration,
     date: period,
   });
   const digest = createHash("sha256").update(signature).digest("hex").slice(0, 32);
@@ -549,8 +555,8 @@ export async function getOrBuildCachedPool<TPool extends CachedPool>(
    * defective. A **nonce in the key** stores the rebuilt pool where nobody else
    * will ever look, so the user pays for a rebuild and the next ordinary page
    * load still serves the stale pool. A **bypass around this function** skips
-   * the single-flight map below, so two clicks fire two full builds — two
-   * Tavily fan-outs, on the operator's key.
+   * the single-flight map below, so two clicks fire two full builds — every
+   * source fetch, and at Tier 2 the model rerank, paid twice.
    *
    * This third shape gives the user a genuinely fresh pool, gives everyone else
    * that pool on their next load, and still builds **once** for a double click.

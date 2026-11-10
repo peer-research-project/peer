@@ -212,7 +212,7 @@ describe("/privacy — Explain this (P3-02d)", () => {
 // setting, or an attached PDF), never otherwise. The code the words describe is
 // `deepReportRequested` (`use-model-report.ts`), which the page hands the gist hook.
 const SEES_TEXT =
-  "The model provider whose key you added sees what a model request carries: your topics and a paper's title and abstract when the briefing is ranked or summarised, and a paper's text when a deep report is written, which happens when you turn on Deep report in your profile or attach a PDF to the paper; on that same condition, and never otherwise, the text is read once more to write the one-line gists in the paper's map.";
+  "The model provider whose key you added sees what a model request carries: your topics and a paper's title and abstract when the briefing is ranked or summarised, and a paper's text when a deep report is written, which happens when you turn on Deep report in your profile, attach a PDF to the paper, or open a PDF you uploaded yourself; on that same condition, and never otherwise, the text is read once more to write the one-line gists in the paper's map.";
 
 describe("/privacy — Who else sees a request names the gist pass (P3-05)", () => {
   const html = renderToStaticMarkup(createElement(PrivacyPage));
@@ -242,9 +242,11 @@ describe("/privacy — Who else sees a request names the gist pass (P3-05)", () 
     expect(html.match(/.{0,40}tavily.{0,40}/gi) ?? []).toEqual([]);
   });
 
-  it("names the two things that switch a deep report on, as the report's own predicate reads them", () => {
+  it("names the three things that switch a deep report on, as the report's own predicate reads them", () => {
     expect(entry).toContain("turn on Deep report in your profile");
     expect(entry).toContain("attach a PDF to the paper");
+    // R-BYOK-1 (1): a standalone upload counts as an attached PDF for the deep report.
+    expect(entry).toContain("open a PDF you uploaded yourself");
   });
 });
 
@@ -496,8 +498,8 @@ describe("/privacy — Say it plainly (P4-01)", () => {
     expect(entry).toContain(`“${PLAIN.button}”`);
   });
 
-  it("keeps the date: this entry is dated 2026-10-07, the day the page last changed", () => {
-    expect(html).toContain("Last changed 2026-10-07");
+  it("keeps the date: the page last changed 2026-10-28 (\"Check key\" in Your own model key), after this entry's 2026-10-07", () => {
+    expect(html).toContain("Last changed 2026-10-28");
   });
 
   it("holds no 'skip' or 'don't read' wording, no allowance and no plan (the copy rules)", () => {

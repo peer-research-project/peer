@@ -6,6 +6,40 @@ All notable user-facing or infrastructure changes to Peer. Newest at the top.
 
 Jobs and events code removed; Peer is a paper briefing.
 
+Your own AI key: easier to set up, easier to check, and removed from this browser when you sign out.
+
+- **Sign in from the walkthrough.** Welcome now opens with an optional Account
+  step (Sign in with GitHub or Google, or "Continue without signing in", which reads "Skip sign-in" on a phone), and
+  the AI step offers the same buttons when you are signed out, because Peer uses
+  your key only while you are signed in. After signing in you come back to the
+  step you left. A paper's "Sign in" link brings you back to that paper.
+- **Check key.** Under the API key field, on Profile and in Welcome, "Check key"
+  asks your provider once whether it accepts the key and tells you what it
+  said: the key works, it was not accepted, its account has no credit left, the
+  provider is turning requests away for now, it answered with an error, or it
+  could not be reached. The check is one short request
+  on your key, which your provider may bill.
+- **Where your key lives, said where you type it.** Profile's AI provider row
+  now says the key stays in this browser only and does not follow your account
+  to another device or browser, and that signing out removes it.
+- **Signing out says what happens to your keys.** With a key saved, Sign out
+  first asks, names the keys, and says why they are removed: so the next person
+  to use this browser cannot run requests on them. A confirmed sign-out now
+  always removes them, and "Reset profile to defaults" says it removes them too.
+- **A paper asks for the right thing.** If you have a key but are signed out, a
+  paper says what needs you to sign in, instead of asking for a key you already
+  added, and the link after it appears only when the sentence asks for something.
+- **Your account cannot touch your keys.** A profile pulled from your account
+  can never set or clear your model key, your choice of AI company or your Jev
+  key.
+- **Tavily is gone.** No setting, no stored key (an old one is cleared on your
+  next visit, and an old backup file cannot bring it back), and no web-search
+  source.
+- **Sign-in only comes back to Peer.** The sign-in callback returns only to
+  Peer's own Welcome, Profile and paper pages.
+- **/privacy.** "Your own model key" now describes Check key, and says that a
+  key does not travel with your account.
+
 ## v0.45.0 — 2026-10-06
 
 Paper screening with your own Jev key.
@@ -63,8 +97,8 @@ your saves and your delivery history, and it is still required to use a key
 (a signed-out visitor with a key reads without a model, and the page now says
 so instead of showing "AI on").
 
-What went with it: the free, trial and paid plans and their prices, the
-deep-report allowances and the daily house ceiling, the model's choice of
+What went with it: the deep-report allowances and the daily house ceiling, the
+model's choice of
 figure for a section (a figure is picked by its caption and number now) and the
 model-written title for an uploaded PDF (its title is the file's own, or the
 file name). The hourly request limit on the AI routes stays.
@@ -1169,16 +1203,13 @@ release is for.
 
 ## v0.24.0 — 2026-09-14
 
-One plan, on Peer's model.
+The whole product, on Peer's model.
 
-The freemium branch is merged, and then cut down to what Peer needs with no
-users yet: **one tier**. Every signed-in reader gets the whole product on
-Peer's own Gemini key — AI ranking, relevance reasons, the model report and
-deep reports with no monthly cap — behind the daily circuit breaker that
-protects the bill. A reader who adds their own key uses it instead. Signed out,
-Peer still works without a model, as before. The free / trial / paid machinery
-stays in the code and the database, resolved to a single plan in one line of
-`lib/entitlement/resolve.ts`, so three plans are one edit away.
+Every signed-in reader gets the whole product on Peer's own Gemini key — AI
+ranking, relevance reasons, the model report and deep reports with no monthly
+cap — behind the daily circuit breaker that protects the bill. A reader who
+adds their own key uses it instead. Signed out, Peer still works without a
+model, as before.
 
 **The build now requires `GOOGLE_API_KEY` on Vercel.** It used to ban it: the
 guard kept deployments BYOK-only. A deployment without the key is refused at
@@ -1188,9 +1219,9 @@ build time rather than shipping a product whose AI silently does nothing.
 `usage_events`, and counts deep reports and rate limits in `usage_counters` —
 tables that exist in production as of today.
 
-**The profile grant is the one that works.** The branch's migration revoked
-UPDATE on the four plan columns, which on Supabase does nothing while the
-table-level grant stands — a signed-in user could have set their own plan. The
+**The profile grant is the one that works.** The migration revoked UPDATE on
+four server-owned columns, which on Supabase does nothing while the
+table-level grant stands — a signed-in user could have written them. The
 migration file now says what production actually ran: table-level write
 revoked, every other column granted back to `authenticated`.
 
@@ -1807,7 +1838,7 @@ typesetting, not meaning, and the page has no other capitals.
 Cite modal, the scroll progress bar, ScrambleText, the icon section titles,
 "At a glance", "Explore further", "More like this", keyword chips, the
 pull-quote of the scoring string, "Why it fits you", "Related from your
-feed", the skeletons and shimmer bars, the tier-upgrade block, and every
+feed", the skeletons and shimmer bars, and every
 fabricated-report path behind them. The plate figure is resolved once per
 paper for the card, the page and the caption line together.
 
@@ -2026,7 +2057,7 @@ and search passes none, so the two messages no longer stack.
 
 Peer is a paper briefing. Events and jobs are gone from the product.
 
-The founders' verdict, verbatim: "先拿掉 event 和 job 我们 focus 在 paper". This
+The owners' verdict, verbatim: "先拿掉 event 和 job 我们 focus 在 paper". This
 release removes every user-facing surface for the two once-a-year verticals.
 The library code underneath (`lib/events`, `lib/jobs`, `lib/opportunities`)
 stays for one more release — see the last paragraph.

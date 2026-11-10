@@ -235,7 +235,7 @@ describe("sanitizePaperReport", () => {
 
 describe("sanitizePaperReport — the restored sections", () => {
   // These existed before the 2026-09 reader rewrite dropped them, and were
-  // brought back on the founder's call. None carries an evidence sentence:
+  // brought back on the owner's call. None carries an evidence sentence:
   // they are Peer's reading, and the page labels them so. S6 (2026-09-15)
   // merged the proposal's "novelty" into `newHere` and deleted the fit
   // block from every *new* report — sanitizePaperReport still accepts an
@@ -412,5 +412,48 @@ describe("reviewPaperLabel", () => {
     expect(
       reviewPaperLabel({ ...base, title: "State-of-the-art folding with diffusion" }),
     ).toBeNull();
+  });
+});
+
+// R-BYOK-2 (W25, 2026-11-05): the sanitizer carries each novelty line's
+// sentence through (whitelisted and capped); `verifyReportEvidence` decides.
+describe("R-BYOK-2: novelty evidence on the wire", () => {
+  const COMPARISON = "Unlike prior work, we follow the same saplings for a whole season.";
+
+  it("carries a result's noveltyEvidence beside its novelty, flat or nested", () => {
+    const flat = sanitizePaperReport({
+      resultsAndSignificance: { summary: "", keyResults: [{ title: "T", detail: "D", evidence, novelty: "New.", noveltyEvidence: ` ${COMPARISON} ` }] },
+    });
+    expect(flat.resultsAndSignificance.keyResults[0]).toMatchObject({ novelty: "New.", noveltyEvidence: COMPARISON });
+    const nested = sanitizePaperReport({
+      resultsAndSignificance: { summary: "", keyResults: [{ title: "T", detail: "D", evidence, novelty: { text: "New.", evidence: COMPARISON } }] },
+    });
+    expect(nested.resultsAndSignificance.keyResults[0]).toMatchObject({ novelty: "New.", noveltyEvidence: COMPARISON });
+  });
+
+  it("keeps no noveltyEvidence without a novelty line, and caps it at evidenceChars", () => {
+    const orphan = sanitizePaperReport({
+      resultsAndSignificance: { summary: "", keyResults: [{ title: "T", detail: "D", evidence, noveltyEvidence: COMPARISON }] },
+    });
+    expect(orphan.resultsAndSignificance.keyResults[0]).not.toHaveProperty("noveltyEvidence");
+    const long = sanitizePaperReport({
+      resultsAndSignificance: { summary: "", keyResults: [{ title: "T", detail: "D", evidence, novelty: "New.", noveltyEvidence: "x".repeat(1000) }] },
+    });
+    expect(long.resultsAndSignificance.keyResults[0].noveltyEvidence?.length).toBe(REPORT_CAPS.evidenceChars);
+  });
+
+  it("reads `newHere: [{ text, evidence }]` as the lines plus newHereClaims; a string line has no claim", () => {
+    const report = sanitizePaperReport({
+      whatItProposes: { summary: "", methods: [], newHere: [{ text: "Grounded line.", evidence: COMPARISON }, "Bare line.", { text: "Third, past the cap.", evidence: COMPARISON }] },
+    });
+    expect(report.whatItProposes.newHere).toEqual(["Grounded line.", "Bare line."]);
+    expect(report.whatItProposes.newHereClaims).toEqual([{ text: "Grounded line.", evidence: COMPARISON }]);
+  });
+
+  it("reads an already-shaped report's newHereClaims back onto its lines by text", () => {
+    const report = sanitizePaperReport({
+      whatItProposes: { summary: "", methods: [], newHere: ["Grounded line."], newHereClaims: [{ text: "Grounded line.", evidence: COMPARISON }, { text: "Not a line.", evidence: COMPARISON }] },
+    });
+    expect(report.whatItProposes.newHereClaims).toEqual([{ text: "Grounded line.", evidence: COMPARISON }]);
   });
 });

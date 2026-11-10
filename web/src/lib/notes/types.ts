@@ -48,6 +48,7 @@ export interface NoteAnchor {
 /** P11-07 (owner item 8; ruling §1h.112 D3): the six colours a highlight can wear. The table behind the ids (names, fills)
  *  is `highlight-colours.ts`; a stored id that is not one of these reads as `yellow`. */
 export type HighlightColourId = "yellow" | "green" | "blue" | "pink" | "orange" | "ink";
+export type ReadingMarkStyle = "highlight" | "bold" | "circle";
 
 /** One actual drawable range, in document order. Offsets belong to this block alone. */
 export interface PassageSegment {
@@ -75,6 +76,8 @@ export interface HighlightSpot {
   start: number;
   end: number;
   colour: HighlightColourId;
+  /** Absent means the original coloured highlight. */
+  mark?: Exclude<ReadingMarkStyle, "highlight">;
 }
 
 export interface Block {

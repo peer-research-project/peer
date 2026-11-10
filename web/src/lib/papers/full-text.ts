@@ -14,6 +14,7 @@ import {
   looksLikeFullText,
   type ExtractedDocument,
 } from "./html-text";
+import { readabilityOf } from "./readability";
 import { classifyHardAccessStatus } from "./paywall-status";
 import { extractPdfTextFromBytes, tryExtractPdfText } from "./pdf-text";
 import { collectSourceLinks, type SourceLink } from "./source-links";
@@ -48,7 +49,7 @@ export interface FullTextResult {
   /** Human-readable reason for non-ok statuses (used in paywall banner). */
   reason?: string;
   /** Every link we tried, for telemetry / debugging. */
-  attempts: Array<{ link: SourceLink; outcome: string }>;
+  attempts: Array<{ link: SourceLink; outcome: string; finalUrl?: string }>;
 }
 
 interface CachedResult {
@@ -61,10 +62,6 @@ const cache = new Map<string, Promise<FullTextResult> | CachedResult>();
 const PAYWALL_PHRASES = [
   "purchase access",
   "buy this article",
-  "access through your institution",
-  "institutional access",
-  "sign in to access",
-  "log in to access",
   "subscribe to continue",
   "subscription required",
   "preview of subscription content",
@@ -73,14 +70,13 @@ const PAYWALL_PHRASES = [
 ];
 
 function appearsPaywalled(html: string): boolean {
-  if (/captcha/i.test(html)) return true;
   const lowered = html.toLowerCase();
   const hasPaywallPhrase = PAYWALL_PHRASES.some((p) => lowered.includes(p));
   const looksOpen = /creative commons|cc-by|free full text|open access/i.test(html);
   return hasPaywallPhrase && !looksOpen;
 }
 
-async function fetchHtml(url: string): Promise<{ ok: true; html: string; finalUrl: string; res: Response } | { ok: false; reason: string; isPdf?: boolean; status?: number }> {
+async function fetchHtml(url: string): Promise<{ ok: true; html: string; finalUrl: string; res: Response } | { ok: false; reason: string; isPdf?: boolean; status?: number; finalUrl?: string }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
@@ -92,7 +88,7 @@ async function fetchHtml(url: string): Promise<{ ok: true; html: string; finalUr
         Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
       },
     });
-    if (!res.ok) return { ok: false, reason: `Fetch returned ${res.status}`, status: res.status };
+    if (!res.ok) return { ok: false, reason: `Fetch returned ${res.status}`, status: res.status, finalUrl: res.url || url };
 
     const contentType = res.headers.get("content-type") ?? "";
     // Some PDF links serve directly when the URL looks HTML — let the PDF
@@ -129,7 +125,7 @@ async function fetchHtml(url: string): Promise<{ ok: true; html: string; finalUr
   }
 }
 
-async function tryHtmlLink(link: SourceLink): Promise<{ status: FullTextStatus; doc?: ExtractedDocument; reason?: string }> {
+async function tryHtmlLink(link: SourceLink): Promise<{ status: FullTextStatus; doc?: ExtractedDocument; reason?: string; finalUrl?: string }> {
   const fetched = await fetchHtml(link.url);
   if (!fetched.ok) {
     // A link filed as HTML that serves a PDF is read as one, here, rather
@@ -139,22 +135,21 @@ async function tryHtmlLink(link: SourceLink): Promise<{ status: FullTextStatus; 
     // then failed here with "Server returned PDF" — the PDF path never ran
     // and the deep report fell back to the abstract (measured 2026-09-14).
     if (fetched.isPdf) return tryPdfLink(link);
-    // 1-16: a hard 401/402/403/451 here is a publisher access gate, not
-    // "could not reach the source" — Wiley/ACS both hard-403 after the DOI
-    // redirect resolves correctly, and were misreported as source_unavailable.
-    // 2-01: except on an aggregator/free host (Ruling 9, §1j) — there a hard
-    // status is an anti-bot block, not a subscription gate.
+    // A refusal alone does not establish a subscription gate. The final
+    // response URL names the host that actually issued it.
     if (typeof fetched.status === "number") {
-      const verdict = classifyHardAccessStatus(link.url, fetched.status);
-      if (verdict === "paywalled") return { status: "paywalled", reason: paywallReason(link.url) };
-      if (verdict === "blocked") return { status: "source_unavailable", reason: blockedReason(link.url) };
+      const verdict = classifyHardAccessStatus(fetched.finalUrl ?? link.url, fetched.status);
+      if (verdict === "paywalled") return { status: "paywalled", reason: paywallReason(fetched.finalUrl ?? link.url), finalUrl: fetched.finalUrl };
+      if (verdict === "blocked") return { status: "source_unavailable", reason: blockedReason(fetched.finalUrl ?? link.url), finalUrl: fetched.finalUrl };
     }
     return { status: "source_unavailable", reason: fetched.reason };
   }
+  if (/captcha/i.test(fetched.html)) return { status: "source_unavailable", reason: blockedReason(fetched.finalUrl), finalUrl: fetched.finalUrl };
   if (appearsPaywalled(fetched.html)) {
     return {
       status: "paywalled",
       reason: paywallReason(fetched.finalUrl),
+      finalUrl: fetched.finalUrl,
     };
   }
   const extractor = chooseHtmlExtractor(fetched.finalUrl);
@@ -168,26 +163,20 @@ async function tryHtmlLink(link: SourceLink): Promise<{ status: FullTextStatus; 
   return { status: "ok", doc };
 }
 
-async function tryPdfLink(link: SourceLink): Promise<{ status: FullTextStatus; doc?: ExtractedDocument; reason?: string }> {
+async function tryPdfLink(link: SourceLink): Promise<{ status: FullTextStatus; doc?: ExtractedDocument; reason?: string; finalUrl?: string }> {
   const result = await tryExtractPdfText(link.url);
   if (result.ok && result.doc) {
     return { status: "ok", doc: result.doc };
   }
-  // 1-16: the status code from the PDF fetch itself (when that's where it
-  // failed) is checked first — a hard 401/402/403/451 there is the same
-  // publisher-gate signal as the HTML path's, and previously reached here
-  // only as an un-matchable reason string ("PDF fetch returned 403").
-  // 2-01: except on an aggregator/free host, where it's a block, not a paywall.
+  // Classify the response against the host reached after redirects.
   if (typeof result.status === "number") {
-    const verdict = classifyHardAccessStatus(link.url, result.status);
-    if (verdict === "paywalled") return { status: "paywalled", reason: paywallReason(link.url) };
-    if (verdict === "blocked") return { status: "source_unavailable", reason: blockedReason(link.url) };
+    const verdict = classifyHardAccessStatus(result.finalUrl ?? link.url, result.status);
+    if (verdict === "paywalled") return { status: "paywalled", reason: paywallReason(result.finalUrl ?? link.url), finalUrl: result.finalUrl };
+    if (verdict === "blocked") return { status: "source_unavailable", reason: blockedReason(result.finalUrl ?? link.url), finalUrl: result.finalUrl };
   }
-  // Otherwise fall back to the phrase-based reasons already produced
-  // elsewhere in the PDF pipeline (e.g. downloadPdf's "likely a
-  // landing/paywall page" when the response wasn't really a PDF).
+  // Only explicit purchase/subscription reasons support a paywall verdict.
   const reason = result.reason ?? "PDF unavailable.";
-  if (/paywall|subscription|purchase|access/i.test(reason)) {
+  if (/subscription required|purchase required/i.test(reason)) {
     return { status: "paywalled", reason };
   }
   return { status: "source_unavailable", reason };
@@ -196,24 +185,21 @@ async function tryPdfLink(link: SourceLink): Promise<{ status: FullTextStatus; d
 function paywallReason(url: string): string {
   try {
     const host = new URL(url).hostname.replace(/^www\./, "");
-    return `${host} requires paid or institutional access — Peer could not read the full paper, so the report falls back to the abstract.`;
+    return `${host} requires paid or institutional access — Peer could not read the full paper.`;
   } catch {
-    return "The publisher requires paid or institutional access — Peer could not read the full paper, so the report falls back to the abstract.";
+    return "The publisher requires paid or institutional access — Peer could not read the full paper.";
   }
 }
 
 /**
- * 2-01 (Ruling 9, §1j): an aggregator/free host's own 401/402/403/451 is an
- * anti-bot block, not a subscription gate — worded separately from
- * `paywallReason` so the honest reason a report falls back to the abstract
- * never claims a paywall that isn't there.
+ * A blocked request is distinct from an established subscription gate.
  */
 function blockedReason(url: string): string {
   try {
     const host = new URL(url).hostname.replace(/^www\./, "");
-    return `${host} blocked this request — Peer could not read the full paper, so the report falls back to the abstract.`;
+    return `${host} blocked this request — Peer could not read the full paper.`;
   } catch {
-    return "The source blocked this request — Peer could not read the full paper, so the report falls back to the abstract.";
+    return "The source blocked this request — Peer could not read the full paper.";
   }
 }
 
@@ -302,6 +288,7 @@ async function buildPublicResult(input: FullTextInput): Promise<FullTextResult> 
 
   const attempts: FullTextResult["attempts"] = [];
   let lastPaywallReason: string | null = null;
+  let lastBlockedReason: string | null = null;
 
   for (const link of links) {
     const outcome =
@@ -309,6 +296,7 @@ async function buildPublicResult(input: FullTextInput): Promise<FullTextResult> 
     attempts.push({
       link,
       outcome: outcome.status + (outcome.reason ? `: ${outcome.reason}` : ""),
+      ...(outcome.finalUrl ? { finalUrl: outcome.finalUrl } : {}),
     });
     if (outcome.status === "ok" && outcome.doc) {
       return {
@@ -318,6 +306,7 @@ async function buildPublicResult(input: FullTextInput): Promise<FullTextResult> 
         attempts,
       };
     }
+    if (outcome.status === "source_unavailable" && outcome.reason?.includes("blocked this request")) lastBlockedReason = outcome.reason;
     if (outcome.status === "paywalled" && outcome.reason) {
       lastPaywallReason = outcome.reason;
     }
@@ -326,6 +315,7 @@ async function buildPublicResult(input: FullTextInput): Promise<FullTextResult> 
   if (lastPaywallReason) {
     return { status: "paywalled", reason: lastPaywallReason, attempts };
   }
+  if (lastBlockedReason) return { status: "source_unavailable", reason: lastBlockedReason, attempts };
   return {
     status: "no_full_text",
     reason: "No legal full-text source returned readable body text.",
@@ -469,7 +459,8 @@ export async function getFullText(input: FullTextInput): Promise<FullTextResult>
   cache.set(key, pending);
   try {
     const result = await pending;
-    cache.set(key, { result, ts: Date.now() });
+    if (readabilityOf(result) === "unknown") cache.delete(key);
+    else cache.set(key, { result, ts: Date.now() });
     return result;
   } catch (err) {
     cache.delete(key);

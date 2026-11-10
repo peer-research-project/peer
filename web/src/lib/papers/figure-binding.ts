@@ -309,12 +309,12 @@ interface PdfSource {
 
 /**
  * Whether the figure-image route can find this id's PDF: a canonical upload id
- * (answered to its owner only), or one of the two public ids `fetchPaperById`
- * looks up. A paper from another source (`semantic_scholar:`, `pubmed:`, …)
+ * (answered to its owner only), or a supported public id `fetchPaperById`
+ * looks up. A paper from another source (`pubmed:`, …)
  * has a report but no route, so its figures stay by value.
  */
 function routeCanFind(paperId: string): boolean {
-  return bareUploadId(paperId) !== null || /^(?:arxiv|openalex):\S/.test(paperId);
+  return bareUploadId(paperId) !== null || /^(?:arxiv|openalex):\S/.test(paperId) || /^semantic_scholar:[a-f0-9]{40}$/i.test(paperId);
 }
 
 /**

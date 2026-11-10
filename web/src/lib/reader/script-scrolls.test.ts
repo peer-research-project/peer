@@ -123,7 +123,7 @@ describe("'Read it here' (scrollToBody, in the reading page)", () => {
 describe("no script scroll asks for the animation by name", () => {
   it("leaves 'behavior: \"smooth\"' to the one helper that reads the setting (`lib/reader/scroll-motion.ts`)", () => {
     const named = sources()
-      .filter(([path, text]) => !path.endsWith("/lib/reader/scroll-motion.ts") && /behavior:\s*["']smooth["']/.test(text))
+      .filter(([path, text]) => !path.split("\\").join("/").endsWith("/lib/reader/scroll-motion.ts") && /behavior:\s*["']smooth["']/.test(text))
       .map(([path]) => path.slice(resolve(process.cwd(), "src").length + 1));
     expect(named).toEqual([]);
   });

@@ -59,10 +59,14 @@
 import type { DashboardDeliveryLedger, PaperIdentity } from "./delivery-ledger";
 import { nextAttemptAt as computeNextAttemptAt } from "./prepare-due";
 import type { DashboardPrepareJob, DashboardPrepareJobRepository } from "./prepare-job-repository";
+import type { SeedOutputContext } from "@/lib/seed-pool/output";
+import type { SeedPoolResolution } from "@/lib/seed-pool/types";
+import { seedOutputContext } from "@/lib/seed-pool/output";
+import type { SeedPreparedBatch } from "@/lib/seed-pool/server";
 
 /** What a real (not-yet-written) pool builder would hand back — opaque item payload, same "never assume a feed-specific shape" discipline delivery-ledger.ts's own `servedItems` already documents. */
 export type PrepareBuildOutcome =
-  | { ok: true; papers: readonly PaperIdentity[]; servedItems?: readonly unknown[] }
+  | { ok: true; papers: readonly PaperIdentity[]; servedItems?: readonly unknown[]; seedContext?: SeedOutputContext }
   | { ok: false; error: string };
 
 export interface PrepareWorkerDeps {
@@ -98,6 +102,9 @@ export interface PrepareWorkerDeps {
   readCurrentIntentVersion: (ownerId: string) => Promise<string | undefined>;
   /** This worker instance's own lease-owner id — must match the id the job was actually claimed under. */
   leaseOwner: string;
+  /** Injected by the scheduler; unavailable means never publish a seeded job. */
+  resolveSeeds?: (ownerId: string, localDate: string, now: Date) => Promise<SeedPoolResolution>;
+  putSeedBatch?: (input: SeedPreparedBatch) => Promise<{ status: string; batchId?: unknown } | null>;
 }
 
 export type PrepareJobOutcome =
@@ -139,8 +146,11 @@ export async function runPrepareJob(
     // structural backstop that makes this safe even if this check were
     // ever wrong or racy; this is purely "don't pay for a pipeline build
     // whose result could never be written anyway."
+    const context = deps.resolveSeeds ? seedOutputContext(await deps.resolveSeeds(job.ownerId, job.localDate, now), job.localDate) : { kind: "legacy" as const };
+    if (context.kind === "unavailable") return await failJob(job, deps, "seed_pool_unavailable", now);
     const existingBatch = await deps.ledger.getBatch(job.ownerId, job.localDate);
-    if (existingBatch) {
+    const existingMatches = context.kind === "legacy" || (existingBatch?.seedPoolVersion ?? "none") === context.version && (existingBatch?.seedRevocationGeneration ?? 0) === context.revocationGeneration;
+    if (existingBatch && existingMatches) {
       // F-A-P4S8b-01: completing the job here is bookkeeping only — the
       // outcome is already-prepared regardless, since the batch itself
       // (read just above) is the actual source of truth. If this call
@@ -166,6 +176,14 @@ export async function runPrepareJob(
       return await failJob(job, deps, built.error, now);
     }
 
+    if (context.kind === "ready") {
+      const used = built.seedContext;
+      if (!used || used.kind !== "ready" || used.version !== context.version || used.revocationGeneration !== context.revocationGeneration || used.localDate !== job.localDate) {
+        return await failJob(job, deps, "seed_pool_changed", now);
+      }
+      if (!deps.putSeedBatch) return await failJob(job, deps, "seed_fence_unavailable", now);
+    }
+
     // FENCING — the single required check (DESIGN B4), taken here: AFTER
     // the build, immediately BEFORE the write. A job whose captured
     // intentVersion no longer matches a freshly recomputed current value
@@ -184,6 +202,12 @@ export async function runPrepareJob(
       return { kind: "stale-intent" };
     }
 
+    if (context.kind === "ready") {
+      const fenced = await deps.putSeedBatch!({ ownerId: job.ownerId, localDate: job.localDate, expectedVersion: context.version, expectedRevocationGeneration: context.revocationGeneration, intentVersion: job.intentVersion, papers: [...built.papers], servedItems: [...(built.servedItems ?? [])] });
+      if (!fenced || fenced.status !== "prepared" || typeof fenced.batchId !== "string") return await failJob(job, deps, "seed_fence_rejected", now);
+      await deps.jobs.complete(job.id, deps.leaseOwner, undefined, now);
+      return { kind: "prepared", batchId: fenced.batchId };
+    }
     const batch = await deps.ledger.prepareBatch(
       job.ownerId,
       job.localDate,

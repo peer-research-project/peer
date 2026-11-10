@@ -92,12 +92,15 @@ export interface Paper {
   authors: string[];
   /** Where the first author works, when the record says so. */
   leadAffiliation?: string;
+  /** OpenAlex institution ID for the first author, when available. */
+  leadInstitutionId?: string;
   relevanceReason: string;
   venue: string;
   source: PaperSource;
   summaryIntro: string;
   summaryExperimentKeywords: string[];
   summaryResultDiscussion: string;
+  abstractRetrieval?: import("@/lib/papers/enrich").AbstractRetrieval;
   /** Semantic Scholar TLDR — machine-written, labelled as such on the reading page; never the abstract. */
   tldr?: string;
   linkPaper?: string;
@@ -165,6 +168,8 @@ export interface Paper {
 // ── User Profile ──
 
 export type CareerStage =
+  | "Undergraduate"
+  | "Master's student"
   | "PhD Year 1"
   | "PhD Year 2"
   | "PhD Year 3"
@@ -344,19 +349,15 @@ export interface UserProfile {
    * so the server-side cron can read it.
    */
   digestEmail?: string;
+  // The Tavily web-search switch and key (`tavilyEnabled`, `tavilyApiKey`) are
+  // gone: no screen set them and nothing read them. A blob saved on a device
+  // before, or an old backup file, can still carry them; the store's migration,
+  // the sync payload and a backup export or restore strip them by name
+  // (`lib/profile/merge.ts`).
   /**
-   * Optional per-user Tavily web-search switch and key. Kept in local browser
-   * state (never synced to the shared profile row) so users can bring their own
-   * key without writing secrets server-side. No screen sets them now: the
-   * onboarding step that did went with the stopped events and jobs feeds, and
-   * the fields stay for a device or a backup that holds one.
-   */
-  tavilyEnabled: boolean;
-  tavilyApiKey?: string;
-  /**
-   * Optional per-user AI override for Tier 2 reranking. Also local-only so
-   * users can bring their own normal API key without syncing secrets to the
-   * shared profile row.
+   * Optional per-user AI override for Tier 2 reranking. Local-only (kept in
+   * browser state, never synced to the shared profile row) so users can bring
+   * their own normal API key without writing secrets server-side.
    */
   feedAiProvider: UserAiProvider;
   feedAiApiKey?: string;
@@ -437,8 +438,6 @@ export const defaultProfile: UserProfile = {
   digestChannel: "inapp",
   digestFrequency: "daily",
   digestEmail: "",
-  tavilyEnabled: false,
-  tavilyApiKey: "",
   feedAiProvider: "default",
   feedAiApiKey: "",
   jevApiKey: "",
@@ -470,6 +469,8 @@ export const themeAccentOptions: {
 ];
 
 export const careerStages: CareerStage[] = [
+  "Undergraduate",
+  "Master's student",
   "PhD Year 1",
   "PhD Year 2",
   "PhD Year 3",

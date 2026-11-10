@@ -174,7 +174,7 @@ export const STANDING = {
  * not place) has none.
  */
 export const MAP = {
-  heading: "Map",
+  heading: "Contents",
   /** P7-14 (R5): the map is the paper's one contents list, so it also says where the text was
    *  read from and how many words there are ("Read from PDF · 21 sections · 10,908 words · about
    *  61 min"), which the rail and the count line under "The paper" used to say. With no word count
@@ -386,6 +386,8 @@ export const BUTTON = {
   skip: "Skip",
   copy: "Copy",
   addKey: "Add a key",
+  /** In place of `addKey` for a reader who saved a key but is signed out: the key is there, the sign-in is not. */
+  signIn: "Sign in",
 };
 
 /** The swipe reveal under the plate — the card's own labels. */

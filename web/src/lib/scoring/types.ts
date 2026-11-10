@@ -30,6 +30,29 @@ export interface ScoreWeights {
   source: number;
 }
 
+/**
+ * R-C7: the seed-pool blend's own inputs and weights, present only when a
+ * usable seed scored the item. Numbers and facet labels only — never seed
+ * phrases or any private PDF text.
+ */
+export interface SeedBlendBreakdown {
+  /** Strongest single seed's facet-weighted similarity, 0…1. */
+  seed: number;
+  /** Declared intent: mean of keyword and pool-relative topicality, 0…1. */
+  intent: number;
+  /** Explicit positive feedback, 0…1; null when there is no feedback history. */
+  feedback: number | null;
+  /** Mean of recency and source quality, 0…1. */
+  recencySource: number;
+  weights: { seed: number; intent: number; feedback: number; recencySource: number };
+  /** The weighted sum before the gradual negative-feedback penalty. */
+  blended: number;
+  /** Gradual negative-feedback multiplier applied to `blended` (1 = none). */
+  preferencePenalty: number;
+  /** Which facets of the strongest seed matched. */
+  seedFacets: ("topic" | "object" | "method")[];
+}
+
 export interface ScoreBreakdown {
   keyword: number;
   /** Raw cosine against the profile text. Diagnostic: ranking uses `topicality`. */
@@ -47,6 +70,7 @@ export interface ScoreBreakdown {
   recency: number;
   source: number;
   combined: number;
+  seedBlend?: SeedBlendBreakdown;
 }
 
 export interface ScoredItem extends RawItem {

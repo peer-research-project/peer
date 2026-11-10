@@ -114,3 +114,18 @@ it("explicit editor undo restores the original group identity without weakening 
   expect(useNotesStore.getState().notes[id].blocks.filter((b) => b.id === made.id)).toHaveLength(1);
   expect(Object.keys(anchorMap(useNotesStore.getState().notes[id], paper.id))).toHaveLength(3);
 });
+
+it.each(["bold", "circle"] as const)("keeps %s on every segment and in both exports", (mark) => {
+  const store = useNotesStore.getState(), id = store.ensureReadingNote(paper);
+  const made = store.addHighlightGroup(id, { paperId: paper.id, segments, mark });
+  expect(made?.created).toBe(true);
+  const note = useNotesStore.getState().notes[id];
+  const marks = anchorMap(note, paper.id);
+  segments.forEach((segment) => expect(marks[segment.paragraphId][0].mark).toBe(mark));
+  const markdown = toMarkdown(note);
+  const html = toPrintHtml(note);
+  for (const segment of segments) {
+    expect(markdown).toContain(mark === "bold" ? `**${segment.quote}**` : `◯ ${segment.quote}`);
+    expect(html).toContain(mark === "bold" ? `<strong>${segment.quote}</strong>` : `>${segment.quote}</span>`);
+  }
+});

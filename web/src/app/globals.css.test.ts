@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 // 6-09 / A6-01: protective test for the font-scale-reaches-the-prose fix.
 //
 // The bug: a `calc()` written INSIDE a custom property's own declaration
@@ -198,7 +199,7 @@ describe("globals.css — the route tint tokens (P1-05, P10-06)", () => {
     expect(css).not.toMatch(/var\(--color-route-/);
     // In the source, every read is a background utility on one of the three
     // tokens, and they all live in the one tier → tint table.
-    const root = new URL("..", import.meta.url).pathname;
+    const root = fileURLToPath(new URL("..", import.meta.url)).split("\\").join("/");
     const reads: string[] = [];
     const walk = (dir: string) => {
       for (const name of readdirSync(dir)) {
@@ -282,7 +283,7 @@ describe("globals.css — the highlighter token (P10-09f)", () => {
 
   it("is read only as a background — by the body's note `<mark>` — and nowhere else", () => {
     expect(css).not.toMatch(/var\(--color-note-mark/);
-    const root = new URL("..", import.meta.url).pathname;
+    const root = fileURLToPath(new URL("..", import.meta.url)).split("\\").join("/");
     const reads: string[] = [];
     const walk = (dir: string) => {
       for (const name of readdirSync(dir)) {
@@ -399,10 +400,10 @@ describe("globals.css — the reader's three panes (P11-10)", () => {
     return css.slice(start, css.indexOf("\n}", start) + 2);
   };
 
-  it("the grid is the left track, a 12px divider, the centre, a 12px divider and the margin", () => {
+  it("the grid is the left track, a 12px divider and the reading column", () => {
     const grid = ruleOf(".reader-shell");
     expect(grid).toMatch(/display:\s*grid;/);
-    expect(grid).toMatch(/grid-template-columns:\s*var\(--left-w\) 12px minmax\(0, 1fr\) 12px var\(--margin-w, 360px\);/);
+    expect(grid).toMatch(/grid-template-columns:\s*var\(--left-w\) 12px minmax\(0, 1fr\);/);
     expect(grid).toMatch(/--left-w:\s*var\(--left-pane-w, 320px\);/);
   });
 
@@ -529,7 +530,7 @@ describe("globals.css — the nested shade and the anchor blue (P10-46)", () => 
   });
 
   it("leaves no literal #3b82f6 in the reader's components, and the anchor square reads the token", () => {
-    const root = new URL("../components", import.meta.url).pathname.replace(/\/$/, "");
+    const root = fileURLToPath(new URL("../components", import.meta.url)).split("\\").join("/");
     const literals: string[] = [];
     const walk = (dir: string) => {
       for (const name of readdirSync(dir)) {

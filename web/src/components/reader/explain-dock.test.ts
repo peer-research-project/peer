@@ -68,14 +68,13 @@ describe("the dock's rectangle against the shell that frames it", () => {
     expect(dock).not.toHaveProperty("THUMB_BAR_PX");
   });
 
-  // P9-20 (BACKLOG-42): the legend is scaled by Fit's zoom and the box is not. The reserve is the legend's height on screen, so the
-  // two facts it rests on are pinned where they are drawn: the legend stands inside the zoom root, the box outside it, and the
-  // root carries the number the box reads.
-  it("the legend is inside the page container that Fit zooms and carries `--page-zoom`; the explain box is outside it — so the window's reserve is `legendHeightPx(zoom)`, not a flat 28 (P9-20)", () => {
+  // The reading redesign (2bcc93bf) removed the rendered foot legend. The
+  // dock still retains its conservative zoom-scaled bottom reserve, and must
+  // remain outside the zoomed page so window coordinates are not scaled.
+  it("keeps the explain box outside the Fit root and scales its bottom reserve", () => {
     const page = read("src/app/papers/[id]/page.tsx");
     const root = page.indexOf('data-zoom-root=""');
-    const legend = page.indexOf("<KeyLegend");
-    const closes = page.indexOf("</PageContainer>", legend);
+    const closes = page.indexOf("</PageContainer>", root);
     const box = page.indexOf("<ExplainBox");
 
     expect(PAGE_ZOOM_ROOT).toBe("[data-zoom-root]");
@@ -83,9 +82,7 @@ describe("the dock's rectangle against the shell that frames it", () => {
     expect(page).toContain('"--page-zoom": pageZoom');
     expect(page).toContain("zoom: pageZoom");
     expect(root).toBeGreaterThan(0);
-    // The legend: after the zoom root opens, before its container closes. The box: after it has closed.
-    expect(legend).toBeGreaterThan(root);
-    expect(closes).toBeGreaterThan(legend);
+    expect(closes).toBeGreaterThan(root);
     expect(box).toBeGreaterThan(closes);
     expect(legendHeightPx(1)).toBe(DOCK_BOTTOM_PX);
     expect(legendHeightPx(2)).toBe(2 * DOCK_BOTTOM_PX);

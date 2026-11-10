@@ -61,3 +61,64 @@ export function walkthroughAction(
   if (pathname === "/") return "redirect";
   return null;
 }
+
+// ── A set-up account signing in (W27, the manager's R-ONB-1, 2026-11-06) ──
+//
+// The owner's report: "when an existing account logged in, the user should
+// not be asked to walkthrough the beginning walkthrough process again". The
+// walkthrough's Account step signs in and comes back to /welcome (see
+// `ACCOUNT_STEP_RETURN_TO`), and the AI and Seed steps do the same; nothing on
+// /welcome used to ask whether the account that just signed in had already
+// been set up. These rules answer it; ProfileSync applies them at the sign-in
+// pull, and FirstRunGate leaves the walkthrough on their answer.
+
+/** The parts of the account's synced row that say it was set up. */
+export type RemoteSetUpProfile = Pick<
+  Partial<UserProfile>,
+  "researchTopics" | "currentProject" | "currentChallenges"
+>;
+
+/**
+ * True when the account's own synced profile shows it was set up: a research
+ * topic, a project or a challenge. The server keeps no onboarding record of
+ * its own (`onboardedAt` and `welcomeSkipped` have no column), so these are
+ * the whole of the evidence. A missing row (`null`, a brand-new account or a
+ * failed pull) is not.
+ */
+export function remoteShowsSetUp(remote: RemoteSetUpProfile | null | undefined): boolean {
+  if (!remote) return false;
+  return (
+    (Array.isArray(remote.researchTopics) && remote.researchTopics.length > 0) ||
+    Boolean(remote.currentProject?.trim()) ||
+    Boolean(remote.currentChallenges?.trim())
+  );
+}
+
+/**
+ * Whether this sign-in is a set-up account arriving, so a reader on /welcome
+ * leaves the walkthrough. `remote` is the account's row as the sign-in pull
+ * fetched it, before this session's merge or push.
+ *
+ * Only on the sign-in itself (R-ONB-1 rule 2): `previousOwner` is the account
+ * this device had confirmed before this sign-in (`syncedAccountId`). It is
+ * `null` after a sign-out (`logOut()` clears it) and on a fresh device, and
+ * another id on an account switch — each a real arrival. When it is already
+ * this user, the reader was signed in all along (a reload, a second auth
+ * event): a row that has topics now may hold the very topic a brand-new reader
+ * added on /welcome a minute ago, and that reader is never taken out of the
+ * walkthrough they are in the middle of.
+ */
+export function isReturningAccountSignIn(
+  previousOwner: string | null,
+  userId: string,
+  remote: RemoteSetUpProfile | null,
+): boolean {
+  if (previousOwner === userId) return false;
+  return remoteShowsSetUp(remote);
+}
+
+/** Where a set-up account goes when it leaves the walkthrough. The gate only
+ *  ever sends a reader to /welcome from `/` (see `walkthroughAction`), and
+ *  the sign-in callback has already used up its return path, so `/` is the
+ *  page they were on their way to. */
+export const RETURNING_ACCOUNT_DESTINATION = "/";

@@ -1,0 +1,20 @@
+# Brief W29-ROUND4 (independent A reviewer: Round 4 full scoring) — 2026-11-06
+
+You are an INDEPENDENT reviewer. You wrote none of this code and none of Rounds 1-3. Do not trust any claim (including the manager's, Round 1's and Round 2's) without checking the cited evidence file, log, test, or code. Measure only: never edit product code, never commit, never push/branch. Write only your scorecard file and scratch files under C:/Users/wbc13/AppData/Local/Temp/peer-claude-w29/.
+Repo: C:/I/Personal/Github - start up project/Peer, branch fixing-bugs-on-uploading-pdf-and-abstract-reading, HEAD 0ec62242 or later (record the HEAD you scored). Production peer.homes now serves d2023e7 (merge of PR #42 = 0ec62242 code, auto-deployed 2026-11-06 23:26 UTC), so production and HEAD carry the same product code.
+Do NOT use a browser and do NOT start anything on ports 3000/3100/3110. Port 3000 runs the manager's production-mode test server (0ec62242) against the isolated peer-test project; you may make read-only unauthenticated HTTP GETs to public paper routes there (max 2 per endpoint per paper). Never read web/.env*.local, never print secrets, no model or network calls besides those GETs. You may run the repo's tests (npx vitest run <paths> from web/) and tsc.
+
+Rubric: docs/handoff/upload-abstract/RUBRIC.md - Theme A (16 units), B (14), C (18). Formula: score = max(0, 100*(PASS - costs)/units); costs unusable 1.0 / misleading 0.5 / cosmetic 0.25; UNRUN is not PASS; hard requirements (source honesty, authentication, ownership, no private shared state, no unsupported model generation) are gates regardless of score. Target 97.9 per theme in two consecutive independent rounds.
+Prior rounds (list of units and prior verdicts only; re-judge every unit yourself): checkpoints/A-w10-round1-scorecard.md, checkpoints/A-w19-round2-provisional-scorecard.md, checkpoints/A-w26-round3-scorecard.md.
+New evidence since Round 3 (verify each), in addition to everything Round 3 verified (re-verify, do not inherit):
+- W27 returning-account walkthrough fix (R-ONB-1): checkpoint C-w27-returning-account-walkthrough.md, commits 598db011..0ec62242; live checks in C:/Users/wbc13/AppData/Local/Temp/peer-rollout-evidence/byok/c10-b7-c17-evidence.md (W27 section). Judge whether it introduces any privacy or ownership regression (sign-out now keeps welcomeSkipped).
+- PR #42 production deploy and smoke: HANDOFF-CLAUDE-PEER-ROLLOUT.md rows dated 2026-11-06/07.
+Round 3 evidence (still relevant):
+- W20/W21/W23 seed facet fixes (C3/C6): checkpoints C-w20-*, C-w21-*, C-w23-* and commits in git log.
+- Production rollout G4 (database bundle applied, deploy, smoke): HANDOFF-CLAUDE-PEER-ROLLOUT.md rows dated 2026-11-04/05 and C:/Users/wbc13/AppData/Local/Temp/peer-rollout-evidence/production-apply/ (00-pre.txt, 01-preflight-summary.txt, bundle-result.txt, 00-post.json, 03-run-E.json, 03-run-E-ruling.txt incl. manager ruling R-E6a on the pre-existing handle_new_user CR, 03-run-E8.txt). Judge R-E6a.
+- A3/B14 own-key deep report: C:/Users/wbc13/AppData/Local/Temp/peer-rollout-evidence/byok/a3-b14-evidence.md (defects D-BYOK-1, D-BYOK-2 and their re-check after W24/W25), checkpoints C-w24-byok-standalone-deep.md, C-w25-byok-novelty-grounding.md.
+- C10/B7/C17 second account: C:/Users/wbc13/AppData/Local/Temp/peer-rollout-evidence/byok/c10-b7-c17-evidence.md, procedure test-project/13-cross-owner-probes.md.
+- Sign-in callback scheme defect and fix: commit efcd536f (judge whether it affected production and whether the fix is complete).
+Score the HEAD code for code-level units; note any unit where production would differ. UNRUN only where no real evidence exists.
+
+Output: docs/handoff/upload-abstract/checkpoints/A-w29-round4-scorecard.md (new file in main checkout, do NOT commit): HEAD sha; per unit PASS / FAIL(cost, kind) / UNRUN with one line of evidence; for each FAIL a one-line mechanism (file:line where you can); per-theme arithmetic; hard-requirement gate verdicts; a list of what would close each remaining cost. Final reply: one paragraph + per-theme score table + list of FAILs/UNRUNs.

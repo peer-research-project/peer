@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { runFeedPipeline } from "@/lib/feed/pipeline";
-import type { FeedMeta, FeedRequest, FeedResponse, FeedEmptyReasonCode, SearchConnectors } from "@/lib/feed/types";
+import { resolveSeedPool, putSeedPreparedBatch, markSeedBatchServed, recordSeedFeedServed } from "@/lib/seed-pool/server";
+import { seedOutputContext } from "@/lib/seed-pool/output";
+import type { FeedMeta, FeedRequest, FeedResponse, FeedEmptyReasonCode } from "@/lib/feed/types";
 import type { ProviderOverrideConfig } from "@/lib/llm/providers/types";
 import type { SourceId } from "@/lib/sources/types";
 import type { ScoredItem } from "@/lib/scoring/types";
@@ -278,20 +280,31 @@ async function runLedgerAwareFeed(
   const startedAt = Date.now();
   const paperCacheScope = pipelineReq.paperCacheScope;
 
-  if (!paperCacheScope || !dashboardLedgerEnabled()) {
-    const response = await runFeedPipeline(pipelineReq, {
-      ledgerExclusions: undefined,
-      now,
-      positiveSeeds,
-      negativeSeedPaperIds,
-      jevScreen,
-    });
+  if (!paperCacheScope) {
+    const response = await runFeedPipeline(pipelineReq, { ledgerExclusions: undefined, now, positiveSeeds, negativeSeedPaperIds, jevScreen });
+    return { response };
+  }
+  const ownerId = paperCacheScope.ownerId;
+  const seedContext = seedOutputContext(await resolveSeedPool(ownerId, { now }));
+  if (seedContext.kind === "unavailable") return { unavailable: true };
+  const seedOptions = seedContext.kind === "ready" && seedContext.version !== "none" ? {
+    seedSnapshot: seedContext.snapshot ?? undefined,
+    seedPoolVersion: seedContext.version,
+    seedRevocationGeneration: seedContext.revocationGeneration,
+    seedTargetLocalDate: seedContext.localDate,
+  } : {};
+  const freeze = dashboardLedgerEnabled() || (seedContext.kind === "ready" && seedContext.version !== "none");
+  if (!freeze) {
+    const response = await runFeedPipeline(pipelineReq, { ledgerExclusions: undefined, now, positiveSeeds, negativeSeedPaperIds, jevScreen, ...seedOptions });
+    if (seedContext.kind === "ready") {
+      const marked = await recordSeedFeedServed({ ownerId, localDate: seedContext.localDate, expectedVersion: seedContext.version, expectedRevocationGeneration: seedContext.revocationGeneration });
+      if (!marked || !["recorded", "already_recorded"].includes(marked.status)) return { unavailable: true };
+    }
     return { response };
   }
 
   const ledger = new SupabaseDashboardDeliveryLedger();
-  const ownerId = paperCacheScope.ownerId;
-  const localDate = localCalendarDate(now);
+  const localDate = seedContext.kind === "ready" ? seedContext.localDate : localCalendarDate(now);
 
   // P4-S3-FIX (Round 3, F-A-P4S3-03, docs/jev-abc/P4-S3-A-20260924T0550Z.md):
   // `getBatch` fails OPEN to `null` on a configured-client read error
@@ -309,7 +322,9 @@ async function runLedgerAwareFeed(
   // selection in place of the true existing batch. Named, accepted cost: one
   // wasted pipeline run. See route.test.ts's dedicated composite-path test.
   const existing = await ledger.getBatch(ownerId, localDate);
-  if (existing) {
+  const existingSeedMatches = seedContext.kind === "legacy" || !existing || ((existing.seedPoolVersion ?? "none") === seedContext.version && (existing.seedRevocationGeneration ?? 0) === seedContext.revocationGeneration);
+  if (existing && existing.status !== "prepared" && !existingSeedMatches) return { unavailable: true };
+  if (existing && existingSeedMatches) {
     if (existing.status === "prepared") {
       // P4-S3-FIX (F-A-P4S3-01): `markServed` throws on a configured-client
       // write failure (delivery-ledger.ts's documented write contract).
@@ -317,12 +332,20 @@ async function runLedgerAwareFeed(
       // 500 instead of the truthful 503 every other ledger-unavailable path
       // on this route already returns.
       try {
-        await ledger.markServed(ownerId, existing.id);
+        if (seedContext.kind === "ready") {
+          const marked = await markSeedBatchServed({ ownerId, localDate, batchId: existing.id, expectedVersion: seedContext.version, expectedRevocationGeneration: seedContext.revocationGeneration });
+          if (!marked || !["served", "already_served"].includes(marked.status)) return { unavailable: true };
+        } else await ledger.markServed(ownerId, existing.id);
       } catch {
         return { unavailable: true };
       }
     }
     const status: DashboardBatchStatus = existing.status === "prepared" ? "served" : existing.status;
+    if (seedContext.kind === "ready" && seedContext.version !== "none" && !existing.servedItems) return { unavailable: true };
+    if (seedContext.kind === "ready") {
+      const fresh = seedOutputContext(await resolveSeedPool(ownerId, { targetLocalDate: localDate } ), localDate);
+      if (fresh.kind !== "ready" || fresh.version !== seedContext.version || fresh.revocationGeneration !== seedContext.revocationGeneration) return { unavailable: true };
+    }
     const { items, reconstructed } = await resolveServedItems(existing, pipelineReq, now);
     return { response: frozenFeedResponse(existing, status, items, reconstructed, startedAt) };
   }
@@ -363,6 +386,7 @@ async function runLedgerAwareFeed(
     positiveSeeds,
     negativeSeedPaperIds,
     jevScreen,
+    ...seedOptions,
   });
 
   const papers: PaperIdentity[] = result.items.map((item) => {
@@ -376,15 +400,19 @@ async function runLedgerAwareFeed(
   // a read failure, instead of leaking an uncaught exception.
   let minted: DashboardBatch;
   try {
-    minted = await ledger.prepareBatch(
-      ownerId,
-      localDate,
-      papers,
-      pipelineReq.intent?.version,
-      result.items,
-    );
-    if (minted.status === "prepared") {
-      await ledger.markServed(ownerId, minted.id);
+    if (seedContext.kind === "ready") {
+      const placed = await putSeedPreparedBatch({ ownerId, localDate, expectedVersion: seedContext.version, expectedRevocationGeneration: seedContext.revocationGeneration, intentVersion: pipelineReq.intent?.version, papers, servedItems: result.items });
+      if (!placed || placed.status !== "prepared" || typeof placed.batchId !== "string") return { unavailable: true };
+      const marked = await markSeedBatchServed({ ownerId, localDate, batchId: placed.batchId, expectedVersion: seedContext.version, expectedRevocationGeneration: seedContext.revocationGeneration });
+      if (!marked || !["served", "already_served"].includes(marked.status)) return { unavailable: true };
+      const readBack = await ledger.getBatch(ownerId, localDate);
+      if (!readBack || readBack.id !== placed.batchId || (readBack.seedPoolVersion ?? "none") !== seedContext.version || (readBack.seedRevocationGeneration ?? 0) !== seedContext.revocationGeneration) return { unavailable: true };
+      const fresh = seedOutputContext(await resolveSeedPool(ownerId, { targetLocalDate: localDate }), localDate);
+      if (fresh.kind !== "ready" || fresh.version !== seedContext.version || fresh.revocationGeneration !== seedContext.revocationGeneration) return { unavailable: true };
+      minted = readBack;
+    } else {
+      minted = await ledger.prepareBatch(ownerId, localDate, papers, pipelineReq.intent?.version, result.items);
+      if (minted.status === "prepared") await ledger.markServed(ownerId, minted.id);
     }
   } catch {
     return { unavailable: true };
@@ -402,7 +430,7 @@ async function runLedgerAwareFeed(
   const wonMintRace =
     minted.papers.length === papers.length &&
     minted.papers.every((p, i) => p.key === papers[i].key);
-  if (wonMintRace) {
+  if (wonMintRace && (seedContext.kind === "legacy" || seedContext.version === "none")) {
     const presentedIds = new Set(result.items.map((item) => item.id));
     // `finalPool` is only present because `includeFinalPool: true` was
     // passed above -- defensively defaults to [] rather than assuming it.
@@ -563,40 +591,6 @@ function cleanOptionalString(input: unknown): string | undefined {
     : undefined;
 }
 
-function parseSearchConnectors(input: unknown): SearchConnectors | undefined {
-  if (!input || typeof input !== "object") return undefined;
-  const maybeObject = input as Record<string, unknown>;
-  const tavilyRaw =
-    maybeObject.tavily && typeof maybeObject.tavily === "object"
-      ? (maybeObject.tavily as Record<string, unknown>)
-      : null;
-  if (!tavilyRaw) return undefined;
-
-  const enabled =
-    typeof tavilyRaw.enabled === "boolean" ? tavilyRaw.enabled : undefined;
-  const apiKey = cleanOptionalString(tavilyRaw.apiKey);
-  const tavily =
-    enabled === undefined && apiKey === undefined
-      ? undefined
-      : { enabled, apiKey };
-
-  // RULING 75 — the gemini connector carries no key (the credential is the
-  // server's own Vertex project) and only ever expresses an OPT-OUT. An absent
-  // connector means "use it when Vertex is present and Tavily is not enabled".
-  const gemini = parseGeminiConnector(maybeObject.gemini);
-
-  if (!tavily && !gemini) return undefined;
-  return { ...(tavily ? { tavily } : {}), ...(gemini ? { gemini } : {}) };
-}
-
-function parseGeminiConnector(
-  input: unknown,
-): { enabled: boolean } | undefined {
-  if (!input || typeof input !== "object") return undefined;
-  const enabled = (input as Record<string, unknown>).enabled;
-  return typeof enabled === "boolean" ? { enabled } : undefined;
-}
-
 function parseLlmOverride(input: unknown): ProviderOverrideConfig | undefined {
   if (!input || typeof input !== "object") return undefined;
   const value = input as Record<string, unknown>;
@@ -747,7 +741,8 @@ export async function POST(req: NextRequest) {
       sourceWeights: body.sourceWeights,
       controls: body.controls,
       aiTier,
-      searchConnectors: parseSearchConnectors(body.searchConnectors),
+      // No `searchConnectors`: Peer runs no web search, so a body's
+      // `searchConnectors` (an old client's Tavily key) is never read.
       llmOverride,
       affiliation: parseAffiliation(body.affiliation),
       excludeIds: parseExcludeIds(body.excludeIds),

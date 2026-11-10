@@ -114,11 +114,20 @@ const SECTIONS = [
     ],
   },
   {
+    // The last two paragraphs (2026-10-28) are written from the "Check key" route
+    // (`app/api/ai/check-key/route.ts`, `lib/llm/key-check.ts`) and from where the key is
+    // kept and cleared (`remoteProfilePayload` and `processConfirmedSignOutCookie` in
+    // `components/profile-sync.tsx`, `logOut` in `store/profile.ts`, the profile route's row
+    // writer), and the Check key paragraph's log line from `lib/llm/usage-log.ts` (`LlmUsage`), which
+    // every provider's `testConnection` writes through. `page.byok-only.test.tsx` pins each sentence
+    // to those lines.
     label: "Your own model key",
     body: [
       "Peer has no model of its own. Ranking by a model, relevance reasons, digest bullets and model reports run only if you add your own provider key; without one you read the briefing without a model.",
       "Your key stays in your browser. It is deliberately excluded from everything Peer syncs to its server — the one line that does it is a `void feedAiApiKey` in the sync code, there so a future edit has to remove it on purpose.",
       "When you ask for something a model does, your browser sends the request to Peer's server with your key attached, and the server passes it to the provider you chose. The key is used for that request and is not stored.",
+      "If you press Check key, your browser sends the key to Peer's server, which makes one short request to that provider to see whether it accepts the key. Peer keeps neither the key nor the provider's answer. The server writes at most one log line for the check — the provider, the model, the token counts, how long it took and whether it worked — and never the key or anything you wrote. If you are signed in, the server also counts this account's checks this hour, a number and nothing else, kept so the limit of ten checks an hour can hold.",
+      "Your key does not travel with your account: Peer never stores it on its server, so on another device you add it again, and signing out removes it from this browser.",
     ],
   },
   {
@@ -133,7 +142,7 @@ const SECTIONS = [
     label: "Who else sees a request",
     body: [
       "Finding papers means asking the open sources: OpenAlex, arXiv, Crossref, Semantic Scholar, and the publisher or repository a paper's full text and figures live on. Those services see the query and the request, as they would for any reader.",
-      "The model provider whose key you added sees what a model request carries: your topics and a paper's title and abstract when the briefing is ranked or summarised, and a paper's text when a deep report is written, which happens when you turn on Deep report in your profile or attach a PDF to the paper; on that same condition, and never otherwise, the text is read once more to write the one-line gists in the paper's map. Jev sees those papers and your project text only if you add a Jev key yourself. Resend sends the email digest if you turn one on. Supabase hosts the database and the sign-in. Vercel hosts the site and counts page views — Vercel Analytics records the page, not who you are.",
+      "The model provider whose key you added sees what a model request carries: your topics and a paper's title and abstract when the briefing is ranked or summarised, and a paper's text when a deep report is written, which happens when you turn on Deep report in your profile, attach a PDF to the paper, or open a PDF you uploaded yourself; on that same condition, and never otherwise, the text is read once more to write the one-line gists in the paper's map. Jev sees those papers and your project text only if you add a Jev key yourself. Resend sends the email digest if you turn one on. Supabase hosts the database and the sign-in. Vercel hosts the site and counts page views — Vercel Analytics records the page, not who you are.",
       "Peer runs no advertising, sells nothing to anyone, and has no third-party trackers beyond the page counter named above.",
     ],
   },
@@ -176,7 +185,7 @@ export default function PrivacyPage() {
       ))}
 
       <p className="annotation text-text-faint mt-12">
-        Last changed 2026-10-07 · changes to this page ship in the{" "}
+        Last changed 2026-10-28 · changes to this page ship in the{" "}
         <Link href="/changelog" className="underline decoration-border-strong underline-offset-4 hover:text-heading">
           changelog
         </Link>

@@ -636,6 +636,9 @@ function buildPass2Prompt(args: {
 
   const evidenceRule =
     "one sentence copied character-for-character from the supplied text (or the abstract) that supports `text`";
+  // R-BYOK-2: a novelty line is kept only on a sentence that states it.
+  const noveltyEvidenceRule =
+    "one sentence copied character-for-character from the supplied text (or the abstract) that itself states this novelty or the comparison with prior work";
 
   const relationSchema = project
     ? {
@@ -716,7 +719,7 @@ function buildPass2Prompt(args: {
   const assemble = (texts: string[], asked: boolean) => JSON.stringify({
     task: isReview
       ? "Create a structured Peer DEEP paper report for a REVIEW or SURVEY from the supplied paper body (or compressed signal) and abstract. List the body's major sections in `reviewContents.sections` using the paper's own section names. Every claim item carries an `evidence` sentence copied character-for-character from the supplied text; omit any item you cannot support that way. Do not fabricate numbers."
-      : "Create a structured Peer DEEP paper report from the supplied paper body (or compressed signal) and abstract. Every claim item carries an `evidence` sentence copied character-for-character from the supplied text; omit any item you cannot support that way. Every key result also carries a `novelty` line saying what is new about THIS result compared to prior approaches. Do not fabricate numbers; if a number is not in the supplied text, omit it.",
+      : "Create a structured Peer DEEP paper report from the supplied paper body (or compressed signal) and abstract. Every claim item carries an `evidence` sentence copied character-for-character from the supplied text; omit any item you cannot support that way. A key result carries a `novelty` line only when a sentence of the supplied text itself states what is new about THIS result or how it compares with prior approaches, and that sentence is its `noveltyEvidence`. Do not fabricate numbers; if a number is not in the supplied text, omit it.",
     userContext: contextHint || "",
     ...(project ? { readerProject: project } : {}),
     paper: {
@@ -745,7 +748,10 @@ function buildPass2Prompt(args: {
           },
         ],
         newHere: [
-          "a short 'new here' line — the novelty, stated only where it differs from `summary`; omit entirely if there is nothing to add beyond the summary (max 2 items)",
+          {
+            text: "a short 'new here' line — the novelty as the paper states it, only where it differs from `summary` (max 2 items; omit entirely when the paper states no novelty and no comparison with prior work)",
+            evidence: noveltyEvidenceRule,
+          },
         ],
       },
       resultsAndSignificance: {
@@ -756,7 +762,8 @@ function buildPass2Prompt(args: {
             detail:
               "one concrete result sentence grounded in the supplied text (report two to four key results when the paper states at least two distinct findings; a single-finding paper may report just one)",
             evidence: evidenceRule,
-            novelty: "one sentence saying what specifically is new about THIS result compared to prior work",
+            novelty: "one sentence saying what specifically is new about THIS result compared to prior work — only when the supplied text states it; omit the key otherwise",
+            noveltyEvidence: noveltyEvidenceRule,
           },
         ],
       },
@@ -778,7 +785,7 @@ function buildPass2Prompt(args: {
       "Return ONLY valid JSON.",
       "`evidence` is one sentence copied character-for-character from the supplied text (or the abstract). Do not paraphrase it, shorten it, or merge sentences.",
       "Omit any claim item you cannot support with such a sentence. An empty array is correct when nothing qualifies.",
-      "`newHere` (proposal) and `novelty` (per result) are Peer's reading and carry no evidence sentence; keep them specific and grounded in the supplied text, never generic.",
+      "Each `newHere` item's `evidence` and each result's `noveltyEvidence` is one sentence copied character-for-character from the supplied text that itself states the novelty or the comparison with prior work (for example 'Unlike prior work, we ...', 'for the first time', 'outperforms existing methods'). A sentence that only describes the method, the data or the result does not qualify: then omit that `newHere` item or the `novelty` key. Never infer a novelty the paper does not state.",
       "Do not repeat a sentence from `summary` inside `newHere`; if the novelty is not separable from the summary, leave `newHere` empty.",
       "No sentence in `summary` or `newHere` exceeds about 25 words; use plain, high-school-reading-level wording.",
       "`limitations` holds only what the authors state; do not infer weaknesses.",
@@ -801,7 +808,7 @@ const PASS2_SYSTEM = [
   "Write a structured deep paper report grounded in the supplied body text.",
   "Every claim carries an `evidence` sentence copied character-for-character from the supplied text; a claim without one is omitted.",
   "Be specific: name the actual technique, finding, or comparison rather than generic phrases.",
-  "Keep proposal, method and novelty separate: proposal says what the paper tries to do; methods say what experiments or evaluations were actually used; novelty says what is new against prior work, in one or two sentences.",
+  "Keep proposal, method and novelty separate: proposal says what the paper tries to do; methods say what experiments or evaluations were actually used; novelty says what is new against prior work, in one or two sentences, only where the supplied text itself states it.",
   "Do not fabricate numbers, citations, or experimental details.",
   "Return only valid JSON.",
 ].join(" ");

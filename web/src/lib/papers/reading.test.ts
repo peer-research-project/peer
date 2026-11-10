@@ -307,7 +307,7 @@ describe("buildReading", () => {
     // is read again once.
     // P12-97, RE-AIMED: 17 -> 18 — no field added; a figure's own text and the running foot leave an uploaded PDF's
     // paragraphs, so a reading cached under 17 can hold them and is read again once.
-    expect(reading.version).toBe(18);
+    expect(reading.version).toBe(20);
     expect(reading.paperId).toBe("openalex:W7204479535");
     expect(reading.builtAt).toBe("2026-09-06T12:00:00.000Z");
     expect(reading.provenance).toEqual({
@@ -641,14 +641,14 @@ describe("describeAvailability", () => {
 
   it("no abstract, with and without a TLDR", () => {
     expect(describeAvailability({ reading: noAbstract, ...noModel })).toEqual([
-      "No abstract is published where Peer can read it — only the record. Open it at the source to judge it.",
+      "Peer could not retrieve an abstract — only the record. Open it at the source to judge it.",
     ]);
     const withTldr: PaperReading = {
       ...noAbstract,
       provenance: { ...noAbstract.provenance, tldr: "A diffusion model for knowledge tracing." },
     };
     expect(describeAvailability({ reading: withTldr, ...noModel })).toEqual([
-      "No abstract is published where Peer can read it. The one-line TLDR above is Semantic Scholar's, not the authors'.",
+      "Peer could not retrieve an abstract. The one-line TLDR above is Semantic Scholar's, not the authors'.",
     ]);
   });
 
@@ -842,6 +842,14 @@ describe("placeFigures", () => {
     expect(placed[1].figures?.[0]).toMatchObject({ label: "Figure 7", after: 1 });
     expect(placed[0].figures).toBeUndefined();
     expect(placed[2].figures).toBeUndefined();
+  });
+
+  it("places a structured table next to its first mention", () => {
+    const table = { rows: [{ cells: [{ text: "Score", header: true }, { text: "93%", header: false }] }] };
+    const placed = placeFigures([section("A", "Introduction.", "Table 2 shows the results.")], [
+      { ordinal: 0, label: "Table 2", caption: "Scores", table },
+    ], null);
+    expect(placed[0].figures?.[0]).toMatchObject({ label: "Table 2", after: 1, table });
   });
 
   it("leaves tables out: a table's caption without its table says nothing", () => {
@@ -1193,4 +1201,17 @@ describe("buildReading — an abstract sentence is one line (P10-40, BACKLOG-38)
     expect(reading.provenance.abstractSentences).toBe(reading.abstract.sentences.length);
     expect(reading.abstract.sentences).toEqual(["One sentence split over lines.", "A second one."]);
   });
+});
+
+
+it("does not assert legacy abstract provenance when no abstract was read", () => {
+  const reading = buildReading({ ...normalPaper, summaryIntro: "", summaryResultDiscussion: "" }, null);
+  const text = describeAvailability({ reading, report: { basis: "model-abstract", droppedClaims: 0 }, providerConfigured: true, profileHasProject: true, modelFailed: false }).join(" ");
+  expect(text).toContain("abstract is unavailable");
+  expect(text).not.toContain("Read by your model from the abstract");
+});
+
+it("uses the final publisher host when a payment response followed a DOI redirect", () => {
+  const result = { status: "paywalled" as const, reason: "publisher.example requires paid or institutional access — Peer could not read the full paper.", attempts: [{ link: { url: "https://doi.org/10.1234/example", kind: "html" as const, label: "doi" as const, rank: 1 }, outcome: "paywalled", finalUrl: "https://publisher.example/article" }] };
+  expect(buildReading(normalPaper, result).provenance.paywallHost).toBe("publisher.example");
 });

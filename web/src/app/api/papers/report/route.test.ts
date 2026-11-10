@@ -341,6 +341,44 @@ describe("POST /api/papers/report streaming", () => {
     expect(report.provenance.droppedClaims).toBe(1);
   });
 
+  // R-BYOK-2 (W25, 2026-11-05): at the abstract tier a novelty line is shown
+  // only on a sentence of the abstract that states the novelty or the
+  // prior-work comparison ("... a 12% improvement over the baseline.").
+  it("R-BYOK-2: keeps a novelty line only on an abstract sentence that states the comparison, and counts the rest", async () => {
+    const generateJsonText = vi.fn().mockResolvedValue(
+      JSON.stringify({
+        ...generatedReport,
+        whatItProposes: {
+          ...generatedReport.whatItProposes,
+          newHere: [
+            "An invented novelty the abstract never states.",
+            { text: "It studies method X.", evidence: abstractSentence },
+          ],
+        },
+        resultsAndSignificance: {
+          summary: generatedReport.resultsAndSignificance.summary,
+          keyResults: [
+            { ...generatedReport.resultsAndSignificance.keyResults[0], novelty: "Beats the baseline by 12%.", noveltyEvidence: resultSentence },
+            { title: "Second", detail: "Method X was studied.", evidence: abstractSentence, novelty: "First study of method X." },
+          ],
+        },
+      }),
+    );
+    mocks.resolveProvider.mockReturnValue({ generateJsonText });
+
+    const report = reportEvent(await readEvents(await POST(request({ paper, stream: true }, "application/json"))));
+
+    expect(report.whatItProposes).not.toHaveProperty("newHere");
+    expect(report.resultsAndSignificance.keyResults).toHaveLength(2);
+    expect(report.resultsAndSignificance.keyResults[0]).toMatchObject({ novelty: "Beats the baseline by 12%.", noveltyEvidence: expect.stringContaining(resultSentence), noveltyEvidenceWhere: "abstract" });
+    expect(report.resultsAndSignificance.keyResults[1]).not.toHaveProperty("novelty");
+    // Two "new here" lines (one bare, one on a sentence that states no novelty) and one bare result novelty.
+    expect(report.provenance.droppedClaims).toBe(3);
+    const prompt = JSON.parse((generateJsonText.mock.calls[0][0] as { userPrompt: string }).userPrompt) as { outputSchema: { resultsAndSignificance: { keyResults: Record<string, string>[] } }; rules: string[] };
+    expect(prompt.outputSchema.resultsAndSignificance.keyResults[0].noveltyEvidence).toContain("states this novelty or the comparison with prior work");
+    expect(prompt.rules.join(" ")).toContain("Never infer a novelty the abstract does not state.");
+  });
+
   it("asks for relationToYourWork only when project is present", async () => {
     const generateJsonText = vi.fn().mockResolvedValue(
       JSON.stringify({
@@ -526,9 +564,8 @@ describe("POST /api/papers/report JSON fallback", () => {
     const report = (await response.json()) as PaperReport;
 
     expect(response.headers.get("content-type")).toContain("application/json");
-    expect(report.whatItProposes.summary).toBe(
-      generatedReport.whatItProposes.summary,
-    );
+    expect(report.whatItProposes.summary).toContain(abstractSentence);
+    expect(report.whatItProposes.summary).not.toContain(generatedReport.whatItProposes.summary);
     expect(report.skim[0].text).toBe(generatedReport.skim[0].text);
     expect(report.provenance.basis).toBe("model-abstract");
     expect(generateJsonText).toHaveBeenCalledTimes(1);
@@ -800,5 +837,33 @@ describe("POST /api/papers/report — the figure binder is told whose PDF it is"
     await run({ paper: { ...paper, id: uploadId }, deepReport: true }, accept);
 
     expect(mocks.bindFiguresToReport.mock.calls[0][0].paper).toEqual({ title: paper.title, id: uploadId });
+  });
+});
+
+
+describe("missing source text", () => {
+  const emptyPaper = { ...paper, summaryIntro: "  ", summaryResultDiscussion: "" };
+  it.each(["application/json", "application/x-ndjson"])("never calls a shallow model, even after a deep failure (%s)", async (accept) => {
+    const generateJsonText = vi.fn();
+    mocks.resolveProvider.mockReturnValue({ generateJsonText });
+    mocks.getFullText.mockResolvedValue({ status: "not_found", attempts: [] });
+    for (const deepReport of [false, true]) {
+      const response = await POST(request({ paper: emptyPaper, deepReport }, accept));
+      const result = accept.includes("ndjson") ? reportEvent(await readEvents(response)) : await response.json();
+      expect(result.noLlm).toBe(true);
+      expect(result.paywallNotice ?? "").not.toContain("Showing an abstract-only report");
+    }
+    expect(generateJsonText).not.toHaveBeenCalled();
+    expect(mocks.generateDeepReport).not.toHaveBeenCalled();
+  });
+  it.each(["application/json", "application/x-ndjson"])("allows a real deep read without an abstract (%s)", async (accept) => {
+    mocks.resolveProvider.mockReturnValue({ generateJsonText: vi.fn() });
+    mocks.getFullText.mockResolvedValue({ status: "ok", doc: { text: "Readable body." }, attempts: [] });
+    mocks.getFigurePool.mockResolvedValue(null);
+    mocks.generateDeepReport.mockResolvedValue(generatedReport);
+    mocks.bindFiguresToReport.mockImplementation((r: PaperReport) => r);
+    const response = await POST(request({ paper: emptyPaper, deepReport: true }, accept));
+    if (accept.includes("ndjson")) await readEvents(response); else await response.json();
+    expect(mocks.generateDeepReport).toHaveBeenCalledTimes(1);
   });
 });

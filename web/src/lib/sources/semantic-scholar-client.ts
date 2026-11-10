@@ -80,13 +80,22 @@ async function attemptFetch(
   url: string,
   init: SemanticScholarInit,
   timeoutMs: number,
+  deadline = Infinity,
 ): Promise<Response | null> {
-  await acquireSlot();
+  const slot = acquireSlot();
+  if (Number.isFinite(deadline)) {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const acquired = await Promise.race([slot.then(() => true), new Promise<false>((resolve) => { timer = setTimeout(() => resolve(false), Math.max(0, deadline - Date.now())); })]);
+    if (timer) clearTimeout(timer);
+    if (!acquired) { void slot.then(releaseSlot); return null; }
+  } else await slot;
   try {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return null;
     const apiKey = process.env.SEMANTIC_SCHOLAR_API_KEY;
     return await fetch(url, {
       ...init,
-      signal: AbortSignal.timeout(timeoutMs),
+      signal: AbortSignal.timeout(Math.max(1, Math.min(timeoutMs, remaining))),
       headers: {
         ...init.headers,
         ...(apiKey ? { "x-api-key": apiKey } : {}),
@@ -112,12 +121,14 @@ export async function fetchSemanticScholar(
   url: string,
   init: SemanticScholarInit = {},
   timeoutMs = DEFAULT_TIMEOUT_MS,
+  options: { deadline?: number; maxRetries?: number } = {},
 ): Promise<Response | null> {
-  let res = await attemptFetch(url, init, timeoutMs);
-  for (const delay of RETRY_DELAYS_MS) {
+  let res = await attemptFetch(url, init, timeoutMs, options.deadline);
+  for (const [index, delay] of RETRY_DELAYS_MS.entries()) {
+    if (index >= (options.maxRetries ?? RETRY_DELAYS_MS.length) || Date.now() + delay >= (options.deadline ?? Infinity)) break;
     if (res?.status !== 429) return res;
     await waitMs(delay);
-    res = await attemptFetch(url, init, timeoutMs);
+    res = await attemptFetch(url, init, timeoutMs, options.deadline);
   }
   return res;
 }

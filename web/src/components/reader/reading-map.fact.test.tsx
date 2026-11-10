@@ -351,7 +351,7 @@ describe("what leaves the page stays plain (P11-35 rule 2)", () => {
     });
   /** The code of a file, its comments taken out (a comment may name `ROUTE.mentions`). */
   const codeOf = (text: string) => text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
-  const sources = walk(SRC).map((path) => ({ path: relative(SRC, path), text: codeOf(readFileSync(path, "utf8")) }));
+  const sources = walk(SRC).map((path) => ({ path: relative(SRC, path).split("\\").join("/"), text: codeOf(readFileSync(path, "utf8")) }));
 
   it("is read by the map's fact line alone: no other source file (an export, a feed, a route, a store) uses the route's mention strings", () => {
     const callers = sources.filter(({ text }) => /ROUTE\.mention\w*/.test(text)).map(({ path }) => path);

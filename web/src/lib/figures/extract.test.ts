@@ -47,7 +47,7 @@ it("P12-28: public candidate pools miss across an engine revision, then reuse th
   }
 });
 
-describe("tryHtmlCandidates — 1-22, a hard 401/402/403/451 is reported as paywalled", () => {
+describe("tryHtmlCandidates — 1-22, hard access statuses are classified by evidence", () => {
   const originalFetch = globalThis.fetch;
 
   afterEach(() => {
@@ -55,7 +55,7 @@ describe("tryHtmlCandidates — 1-22, a hard 401/402/403/451 is reported as payw
     vi.restoreAllMocks();
   });
 
-  it("reports a hard-403 response as paywalled, not source_unavailable", async () => {
+  it("reports a hard-403 response as blocked", async () => {
     globalThis.fetch = vi.fn(async () => new Response("", { status: 403 })) as unknown as typeof fetch;
 
     const result = await tryHtmlCandidates(
@@ -63,7 +63,7 @@ describe("tryHtmlCandidates — 1-22, a hard 401/402/403/451 is reported as payw
       "publisher",
     );
 
-    expect(result.status).toBe("paywalled");
+    expect(result.status).toBe("source_unavailable");
     expect(result.reason).toContain("onlinelibrary.wiley.com");
   });
 

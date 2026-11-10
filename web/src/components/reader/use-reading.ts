@@ -24,10 +24,13 @@ import type { Paper } from "@/types";
 import { buildReading, type PaperReading } from "@/lib/papers/reading";
 import { isFullTextPending } from "@/lib/papers/full-text-pending";
 import { FULL_TEXT_WAIT } from "./copy";
+import { fingerprintReadingSource } from "@/lib/papers/reading-source";
+import { recordReadingKey } from "@/lib/papers/reading-identity";
+export { fingerprintReadingSource } from "@/lib/papers/reading-source";
 
-const STORAGE_KEY = "peer-reading-v2";
+export const READING_CACHE_KEY = "peer-reading-v4";
 const MAX_ENTRIES = 40;
-const TTL_MS = 24 * 60 * 60 * 1000;
+export const READING_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 /** The shape both gates below accept. Typed from the document itself, so
  *  bumping `PaperReading["version"]` is the only edit a shape change needs.
  *
@@ -39,7 +42,7 @@ const TTL_MS = 24 * 60 * 60 * 1000;
  *  old full reading (P8-04). The version in the URL moves the cache's key with
  *  the bump, so an old body is never served to a newer client. The route
  *  ignores the parameter. */
-export const READING_VERSION: PaperReading["version"] = 18;
+export const READING_VERSION: PaperReading["version"] = 20;
 
 /** P12-58: how long to wait after the 1st, 2nd, 3rd and 4th pending answer before asking again. */
 export const POLL_DELAYS_MS: readonly number[] = [2_000, 4_000, 8_000, 16_000];
@@ -80,12 +83,14 @@ type ReadingCache = Record<string, { reading: PaperReading; ts: number }>;
  * was built against. `undefined` for every paper without a private
  * attachment, so the key is unchanged for the vast majority of papers.
  */
+
 export function buildReadingKey(
   paperId: string | undefined,
   uploadId: string | undefined,
   revision: number | undefined,
+  sourceFingerprint = "",
 ): string {
-  return `${paperId ?? ""}|${uploadId ?? "public"}|${revision ?? ""}`;
+  return `${paperId ?? ""}|${uploadId ?? "public"}|${revision ?? ""}${sourceFingerprint ? `|source:${sourceFingerprint}` : ""}`;
 }
 
 // Every touch of localStorage is wrapped: a private window, a full quota or
@@ -93,7 +98,7 @@ export function buildReadingKey(
 function readCache(): ReadingCache {
   if (typeof window === "undefined") return {};
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(READING_CACHE_KEY);
     if (!raw) return {};
     const parsed: unknown = JSON.parse(raw);
     return parsed && typeof parsed === "object" ? (parsed as ReadingCache) : {};
@@ -102,10 +107,10 @@ function readCache(): ReadingCache {
   }
 }
 
-function readCached(key: string): PaperReading | null {
+export function readCached(key: string): PaperReading | null {
   const entry = readCache()[key];
   if (!entry?.reading || entry.reading.version !== READING_VERSION) return null;
-  if (Date.now() - (entry.ts ?? 0) >= TTL_MS) return null;
+  if (Date.now() - (entry.ts ?? 0) >= READING_CACHE_TTL_MS) return null;
   return entry.reading;
 }
 
@@ -125,7 +130,7 @@ function writeCached(key: string, reading: PaperReading): void {
         .sort((a, b) => (b[1].ts ?? 0) - (a[1].ts ?? 0))
         .slice(0, MAX_ENTRIES),
     );
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(pruned));
+    localStorage.setItem(READING_CACHE_KEY, JSON.stringify(pruned));
   } catch {
     // The reading is already on screen; the cache is a convenience.
   }
@@ -147,12 +152,12 @@ type Asked =
   /** No usable answer; `again` is whether asking again could help (a dropped connection, a 5xx). */
   | { kind: "failed"; again: boolean };
 
-async function askReading(url: string, signal: AbortSignal, privatePdf: boolean): Promise<Asked> {
+async function askReading(url: string, signal: AbortSignal, privatePdf: boolean, sourceFingerprint: string): Promise<Asked> {
   try {
     const res = await fetch(url, { signal });
     if (!res.ok) return { kind: "failed", again: res.status >= 500 };
     const reading = (await res.json()) as PaperReading;
-    if (reading?.version !== READING_VERSION) return { kind: "failed", again: false };
+    if (reading?.version !== READING_VERSION || reading.sourceFingerprint !== sourceFingerprint) return { kind: "failed", again: false };
     // The route answers a full text that has not settled with the abstract alone, marked pending
     // (P12-58). It is never kept, whatever the headers say, and it is not the answer.
     if (isFullTextPending(reading)) return { kind: "pending" };
@@ -209,7 +214,13 @@ export function useReading(paper: Paper | undefined): {
   }, []);
   const uploadId = paper?.fullTextUploadId;
   const privatePdf = !!uploadId || !!paperId?.startsWith("upload:");
-  const readingKey = buildReadingKey(paperId, uploadId, paper?.revision);
+  const sourceFingerprint = paper ? fingerprintReadingSource(paper) : "";
+  const readingKey = buildReadingKey(paperId, uploadId, paper?.revision, sourceFingerprint);
+
+  useEffect(() => {
+    if (!paperId) return;
+    try { recordReadingKey(paperId, readingKey, localStorage); } catch { /* storage unavailable */ }
+  }, [paperId, readingKey]);
 
   // Synchronous and complete: the page the reader sees before any request.
   const reading0 = useMemo(() => (paper ? buildReading(paper, null) : null), [paper]);
@@ -221,7 +232,10 @@ export function useReading(paper: Paper | undefined): {
   // P0-02 (spec D0): keyed by `readingKey`, which names the upload and its
   // revision, so a private PDF's reading is cached too — under its own key,
   // never the public paper's — instead of being read again on every open.
-  const cached = useMemo(() => (paperId ? readCached(readingKey) : null), [paperId, readingKey]);
+  const cached = useMemo(() => {
+    const value = paperId ? readCached(readingKey) : null;
+    return value?.sourceFingerprint === sourceFingerprint ? value : null;
+  }, [paperId, readingKey, sourceFingerprint]);
 
   const [fetched, setFetched] = useState<Fetched | null>(null);
 
@@ -236,13 +250,13 @@ export function useReading(paper: Paper | undefined): {
       await Promise.resolve();
       if (signal.aborted) return;
       // `v` first, so a private request keeps its `upload` parameter after it.
-      const url = `/api/papers/${encodeURIComponent(paperId)}/reading?v=${READING_VERSION}${uploadId ? `&upload=${encodeURIComponent(uploadId)}` : ""}`;
+      const url = `/api/papers/${encodeURIComponent(paperId)}/reading?v=${READING_VERSION}&sf=1${sourceFingerprint ? `&source=${sourceFingerprint}` : ""}${uploadId ? `&upload=${encodeURIComponent(uploadId)}` : ""}`;
       const startedAt = Date.now();
       let pendingAnswers = 0;
       // One request in flight at a time: the next ask is made only after the last one answered
       // and the wait after it has passed. The cleanup below aborts the request and the wait both.
       for (;;) {
-        const asked = await askReading(url, signal, privatePdf);
+        const asked = await askReading(url, signal, privatePdf, sourceFingerprint);
         if (signal.aborted) return;
         if (asked.kind === "reading") {
           if (asked.keep) writeCached(readingKey, asked.reading);
@@ -272,7 +286,7 @@ export function useReading(paper: Paper | undefined): {
       }
     })();
     return () => controller.abort();
-  }, [paperId, cached, uploadId, privatePdf, readingKey]);
+  }, [paperId, cached, uploadId, privatePdf, readingKey, sourceFingerprint]);
 
   const server = fetched && fetched.id === readingKey ? fetched.reading : null;
   const reading = server ?? cached ?? reading0;

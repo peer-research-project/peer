@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { defaultProfile } from "@/types";
 import { useProfileStore } from "@/store/profile";
 import { jevGainSentence } from "@/lib/decisions/jev-claim";
+import { offersSignIn } from "@/app/welcome/completeness";
 import {
   JEV_SIGNUP_URL,
   JEV_SIGN_IN_NOTE,
@@ -130,7 +131,7 @@ describe("JevSetup on the Profile page", () => {
   it("says it is optional, when it applies, and where the key lives, without claiming more than the code does", () => {
     const text = profileText();
     expect(text).toContain(
-      "Optional. Applies to your next briefing. Peer keeps the key in this browser, never in your account; its server passes the key to Jev while it screens your papers and does not store or log it.",
+      "Optional. Used for your next briefing and searches you run with Jev. Peer keeps the key in this browser, never in your account; its server passes the key to Jev while it screens your papers and does not store or log it.",
     );
   });
 
@@ -288,8 +289,8 @@ describe("what the Jev copy never says", () => {
     expect(all()).not.toMatch(/%|percent/i);
   });
 
-  it("states no number for the improvement: the only digits are the 50-candidate ceiling", () => {
-    const withoutCeiling = all().replace(/For each of the 50 best candidates/g, "For each of the best candidates");
+  it("states no number for the improvement: digits only describe candidate limits", () => {
+    const withoutCeiling = all().replace(/For each of the 50 best candidates/g, "For each of the best candidates").replace(/up to 12 results/g, "up to results");
     expect(withoutCeiling).not.toMatch(/\d/);
   });
 
@@ -358,11 +359,22 @@ describe("the signed-out note", () => {
     expect(view("profile", "unknown", KEY)).not.toContain(JEV_SIGN_IN_NOTE);
   });
 
-  it("the welcome block says it too, once, because a reader can paste a key there before signing in", () => {
-    const text = view("welcome", "signed-out", KEY);
-    expect(text).toContain(JEV_SIGN_IN_NOTE);
-    expect(text.split(JEV_SIGN_IN_NOTE)).toHaveLength(2);
-    expect(view("welcome", "signed-in", KEY)).not.toContain(JEV_SIGN_IN_NOTE);
+  // R1-fixA item 3 — CHANGED: this was "the welcome block says it too, once".
+  // On the Welcome AI step the block "Sign in to use your key", with its two
+  // buttons, already sits above this one for every reader the note would
+  // reach, so the welcome variant leaves the note out; the Profile keeps it.
+  it("the welcome block leaves the note out, in every sign-in state, while the Profile, signed out with a key, keeps it", () => {
+    for (const outcome of ["signed-out", "signed-in", "unconfigured", "unknown"] as const) {
+      expect(view("welcome", outcome, KEY)).not.toContain(JEV_SIGN_IN_NOTE);
+    }
+    expect(view("welcome", "signed-out", KEY)).toContain("Jev API key");
+    expect(view("profile", "signed-out", KEY)).toContain(JEV_SIGN_IN_NOTE);
+  });
+
+  it("every reader the note would reach on Welcome sees the AI step's own sign-in block instead", () => {
+    for (const outcome of ["signed-out", "signed-in", "unconfigured", "unknown"] as const) {
+      if (jevSignInNote(outcome, KEY) !== null) expect(offersSignIn(outcome)).toBe(true);
+    }
   });
 
   it("never prints the key, and the note names no plan, tier or abbreviation", () => {
