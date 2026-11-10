@@ -23,9 +23,7 @@ import { createElement, type ReactElement, type ReactNode } from "react";
 import { stagedRuntime } from "@/test-support/staged-runtime";
 import { useMarginStore } from "@/lib/reader/margin";
 import { useReaderPanesStore } from "@/store/reader-panes";
-import { useReadingPrefsStore } from "@/store/reading-prefs";
 import { PaneDivider } from "./pane-divider";
-import { fitPanes, paneRange, readingCentreDragMinimum, stepPane, type PaneName, type PaneRoom } from "./pane-layout";
 import { PEEK_CLOSE_MS, PEEK_OPEN_MS, ReaderShell } from "./reader-shell";
 
 // P11-10 rule 3 (B P11-01 §2.3, §2.6, §6; ruling §1h.113 (a), D6): the left pane's three states — pinned, rail, peek — and what moves

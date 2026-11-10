@@ -8,7 +8,6 @@ import type { Paper } from "@/types";
 import { routeByQuestions, type RouteResult } from "@/lib/papers/reading-map";
 import { blockMarker } from "@/lib/text/math";
 import { PaperBody, mergeQuestionRoute, paragraphAnchor, questionRouteOverlay, sectionAnchor } from "./paper-body";
-import { FIGURE_EXTRACTION_REVISION } from "@/lib/figures/figure-revision";
 
 // P1-04 (§1f.12): every paragraph of the body is a destination — the map's
 // paragraph lines scroll to it — and nothing else in the body changes.
