@@ -14,12 +14,25 @@
 
 Peer brings relevant papers together in a focused daily briefing, then gives you a place to read and keep notes. Tell it what you work on, and refine your interests as your research changes.
 
-## From discovery to understanding
+## A briefing for your field
 
-- **A briefing for your field.** Follow topics and research interests to find papers across sources including OpenAlex, arXiv, PubMed, Semantic Scholar, and DBLP.
-- **A place to read.** Explore a paper’s sections, figures, tables, and equations when readable full text is available. When it isn't, Peer links back to the source.
-- **Notes that stay yours.** Highlight passages and collect your thoughts in a dedicated notes workspace.
-- **Search beyond the briefing.** Look up papers by topic, title, author, or venue.
+Follow the topics and research interests that matter to you. Peer brings papers from sources including OpenAlex, arXiv, PubMed, Semantic Scholar, and DBLP into one focused briefing.
+
+![Peer briefing showing a grid of research paper cards](assets/screenshots/briefing.jpg)
+
+## Read with context
+
+Open an available paper in Peer to navigate its sections and read its text, figures, tables, and equations together. Highlight passages and collect your thoughts in a dedicated notes workspace. When readable full text is unavailable, follow the link to the source.
+
+![Peer reader showing a paper outline and typeset equations](assets/screenshots/reader.jpg)
+
+<sub>Reader example: [ZENO: Nonlinear filtering with Zakai Equation Neural Operators](https://arxiv.org/abs/2610.32926).</sub>
+
+## Search beyond the briefing
+
+Look up papers by topic, title, author, or venue, and narrow results with filters.
+
+![Peer search showing results for neural networks](assets/screenshots/search.jpg)
 
 The core briefing works without an AI key. Optional model features use your own key; availability and results depend on the source and provider.
 

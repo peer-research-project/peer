@@ -14,12 +14,25 @@
 
 Peer 把与你相关的论文整理成每日简报，也提供阅读和记录的空间。告诉 Peer 你正在研究什么，随着研究推进随时调整兴趣。
 
-## 从发现到理解
+## 为你的研究准备的简报
 
-- **关注自己的研究领域。** 根据主题与研究兴趣，从 OpenAlex、arXiv、PubMed、Semantic Scholar、DBLP 等来源发现论文。
-- **专注阅读。** 在可获得可读全文时，浏览论文的章节、图片、表格和公式；无法获取时，可以访问原始来源。
-- **留下自己的笔记。** 标记段落，在独立的笔记空间整理想法。
-- **搜索更多论文。** 按主题、标题、作者或期刊查找简报之外的研究。
+关注与你有关的主题和研究方向。Peer 从 OpenAlex、arXiv、PubMed、Semantic Scholar、DBLP 等来源汇集论文，整理成一份专注的简报。
+
+![Peer 简报中的论文卡片](assets/screenshots/briefing.jpg)
+
+## 带着上下文阅读
+
+在 Peer 中打开可阅读的论文，按章节浏览正文、图片、表格和公式。标记段落，在独立的笔记空间整理想法；无法获取可读全文时，可以访问原始来源。
+
+![Peer 阅读器中的论文目录和公式](assets/screenshots/reader.jpg)
+
+<sub>阅读示例：[ZENO: Nonlinear filtering with Zakai Equation Neural Operators](https://arxiv.org/abs/2610.32926)。</sub>
+
+## 搜索简报之外的研究
+
+按主题、标题、作者或期刊查找论文，并用筛选条件缩小范围。
+
+![Peer 搜索神经网络论文的结果](assets/screenshots/search.jpg)
 
 核心简报无需 AI 密钥即可使用。可选的模型功能使用你自己的密钥；功能可用性和结果取决于来源与服务商。
 
