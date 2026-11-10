@@ -14,6 +14,7 @@
 // Decision block shows. Nothing else on the page hand-writes a status string.
 
 import type { Paper } from "@/types";
+import { FIGURE_EXTRACTION_REVISION } from "@/lib/figures/figure-revision";
 import { fingerprintReadingSource } from "./reading-source";
 import type { ExtractedFigureCaption, ExtractedTable } from "./html-text";
 import type { ExtractedDocument } from "./html-text";
@@ -101,7 +102,13 @@ export interface ReadingProvenance {
   abstractSentences: number;
   /** Semantic Scholar's TLDR — labelled as such on the page, never merged into the abstract. */
   tldr?: string;
-  fullText: "none" | "html" | "pdf" | "pdf_unreadable_here" | "pdf_empty" | "paywalled" | "blocked";
+  /**
+   * What the reading was built from. "none" is a settled fact (the attempt finished and there is no text);
+   * "pending" (P12-58) is the abstract alone from an attempt that has not finished, or failed in a way that
+   * is a fact about the moment: the route answers it when its wait ended first, the page asks again, and it
+   * is never kept — see `full-text-pending.ts`.
+   */
+  fullText: "none" | "pending" | "html" | "pdf" | "pdf_unreadable_here" | "pdf_empty" | "paywalled" | "blocked";
   /** "arXiv HTML" | "Zenodo PDF" | "PMC" | "publisher page" … */
   sourceLabel?: string;
   /** PDFs only. */
@@ -154,10 +161,16 @@ export interface PaperReading {
    * 13 → 14 (P10-42): a sentence cut by a page break or a floating figure is one paragraph
    * again, so a reading cached under 13 can hold it in two. Read again once.
    *
-   * 14 → 16: PDFs with narrow column gutters are re-extracted in reading order;
-   * cached passages use the previous extraction and need to be refreshed.
+   * 16 → 17 (P12-58): `provenance.fullText` gains "pending". No settled reading changes; the bump is for the
+   * tab still running the build before it, which kept any private reading whose `fullText` was not "none" for a day
+   * and so would have kept a pending one. A reading cached under 16 is read again once.
+   *
+   * 17 → 18 (P12-97): a figure's own text (tick strings, axis titles, legend entries, panel words) and the running foot
+   * leave an uploaded PDF's paragraphs, so a reading cached under 17 can hold them in its body, its findings and its
+   * map. Read again once.
    */
-  version: 19;
+  // P12-28: discard derived figure URLs and dimensions made by the old caption pairing.
+  version: 20;
   sourceFingerprint?: string;
   paperId: string;
   builtAt: string;
@@ -634,11 +647,11 @@ function readableBody(sections: ReturnType<typeof readableSections>): ReadingSec
 }
 
 /** The route that draws one figure of a PDF: the region on `page` whose
- *  caption opens "Figure `fig`". Relative: the page that renders the reading
- *  is the origin that built it. It answers a public paper's PDF to anyone and
- *  an upload's to its owner only (P9-29). */
-export function pdfFigureUrl(paperId: string, page: number, fig: number): string {
-  return `/api/papers/${encodeURIComponent(paperId)}/figure-image?page=${page}&fig=${fig}`;
+ *  caption opens "Figure `fig`" — or, for the token `ed3`, "Extended Data Fig. 3" (P12-56, R14a).
+ *  Relative: the page that renders the reading is the origin that built it.
+ *  It answers a public paper's PDF to anyone and an upload's to its owner only (P9-29). */
+export function pdfFigureUrl(paperId: string, page: number, fig: number | string): string {
+  return `/api/papers/${encodeURIComponent(paperId)}/figure-image?page=${page}&fig=${fig}&v=${FIGURE_EXTRACTION_REVISION}`;
 }
 
 /** A picture's width or height: a positive whole number of pixels, nothing else. */
@@ -647,15 +660,43 @@ function isWhole(n: unknown): n is number {
 }
 
 /** The number a "Figure 3" / "Fig 3" label names, or null where the figure
- *  route has nothing to look for: "Figure IV", "Figure S3", "Table 1". */
-export function pictureNumber(label: string): number | null {
-  const m = /^fig(?:ure)?\.?\s*([1-9]\d{0,2})$/i.exec(label.trim());
-  return m ? Number(m[1]) : null;
+ *  route has nothing to look for: "Figure IV", "Figure S3", "Table 1".
+ *
+ *  P12-56 (R14a): an "Extended Data Fig. 3" label names the token `ed3`, its own numbering: the route's
+ *  `fig` parameter, and the key that keeps it apart from "Fig. 3". A supplementary figure ("Fig. S3",
+ *  "Supplementary Fig. 3") is another file's and names nothing. */
+export function pictureNumber(label: string): number | string | null {
+  const m = /^(extended\s+data\s+)?fig(?:ure)?\.?\s*([1-9]\d{0,2})$/i.exec(label.trim());
+  if (!m) return null;
+  return m[1] ? `ed${m[2]}` : Number(m[2]);
 }
 
-function figureNumber(label: string): number | null {
-  const m = /^fig(?:ure)?\.?\s*S?(\d+)/i.exec(label.trim());
-  return m ? Number(m[1]) : null;
+/** The numbering a figure belongs to: the paper's own ("Fig. 3"), the Extended Data's ("Extended Data
+ *  Fig. 3") or a supplementary file's ("Fig. S3", "Supplementary Fig. 3"). A PDF prints the first two as captions;
+ *  the third it does not, and a citation of one is left as it is. */
+type FigureSpace = "main" | "extended" | "supplementary";
+
+const SUPPLEMENTARY_PREFIX = /^supp(?:lementary|lemental)?\.?(?:\s+information)?$/i;
+
+/** The numbering and number a caption's label names, or null where it names no figure. */
+function figureNumber(label: string): { space: FigureSpace; n: number } | null {
+  const m = /^(extended\s+data\s+|supp(?:lementary|lemental)?\.?(?:\s+information)?\s+)?fig(?:ure)?\.?\s*(S?)(\d+)/i.exec(label.trim());
+  if (!m) return null;
+  const space: FigureSpace = m[2] || (m[1] && SUPPLEMENTARY_PREFIX.test(m[1].trim())) ? "supplementary" : m[1] ? "extended" : "main";
+  return { space, n: Number(m[3]) };
+}
+
+/** Every figure the text cites, in the order it cites them, each with its numbering. "Extended Data Fig. 3",
+ *  "Supplementary Fig. 3", "Fig. S3" and "Fig. 3" are four citations of three numberings. */
+const CITATION =
+  /\b(?:(extended\s+data|supp(?:lementary|lemental)?\.?(?:\s+information)?)\s+)?fig(?:ure|s?\.)?\s*(S?)(\d+)(?![\d.])/gi;
+
+function cites(paragraph: string, space: FigureSpace, n: number): boolean {
+  for (const m of paragraph.matchAll(CITATION)) {
+    const cited: FigureSpace = m[2] || (m[1] && SUPPLEMENTARY_PREFIX.test(m[1])) ? "supplementary" : m[1] ? "extended" : "main";
+    if (cited === space && Number(m[3]) === n) return true;
+  }
+  return false;
 }
 
 /**
@@ -695,17 +736,20 @@ export function placeFigures(
   const seen = new Set<string>();
   for (const c of captions) {
     const isTable = /^table/i.test(c.label);
-    if (!/^fig/i.test(c.label) && !(isTable && c.table)) continue;
+    if (!/^(?:extended\s+data\s+)?fig/i.test(c.label) && !(isTable && c.table)) continue;
     if (seen.has(c.label)) continue;
     seen.add(c.label);
 
     let at: { section: number; after: number } | null = null;
-    const n = isTable ? Number(c.label.match(/\d+/)?.[0]) : figureNumber(c.label);
-    if (n !== null) {
-      const mention = new RegExp(`\\b${isTable ? "tab(?:le|s?\\.)?" : "fig(?:ure|s?\\.)?"}\\s*${n}(?![\\d.])`, "i");
+    const named = isTable ? null : figureNumber(c.label);
+    const tableNumber = isTable ? c.label.match(/\d+/)?.[0] : undefined;
+    const tableMention = tableNumber ? new RegExp(`\\btab(?:le|s?\\.)?\\s*${tableNumber}(?![\\d.])`, "i") : null;
+    if (named !== null || tableMention !== null) {
+      // P12-56 (R14a): the paragraph that first names THIS numbering's figure: "Extended Data Fig. 3" is not
+      // a mention of "Fig. 3", nor "Supplementary Fig. 3" or "Fig. S3" (a figure the PDF does not print).
       outer: for (let si = 0; si < out.length; si++) {
         for (let pi = 0; pi < out[si].paragraphs.length; pi++) {
-          if (mention.test(out[si].paragraphs[pi])) {
+          if (named ? cites(out[si].paragraphs[pi], named.space, named.n) : tableMention?.test(out[si].paragraphs[pi])) {
             at = { section: si, after: pi };
             break outer;
           }
@@ -824,7 +868,7 @@ export function buildReading(
   omitted.push({ block: "nextStep", reason: "needs_key" });
 
   return {
-    version: 19,
+    version: 20,
     sourceFingerprint: fingerprintReadingSource(paper),
     paperId: paper.id,
     builtAt: now.toISOString(),

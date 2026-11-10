@@ -369,11 +369,11 @@ describe("R-C3b no facet label holds a verb (W20)", () => {
 // concepts still held verbs. 15 retires it: the next open is a cache miss
 // that reads the stored PDF again (nothing is deleted).
 describe("the extraction version after verb-holding phrases left the facets (R-C3b)", () => {
-  it("is 15", () => {
-    expect(UPLOAD_CONCEPT_EXTRACTION_VERSION).toBe(15);
+  it("is 16", () => {
+    expect(UPLOAD_CONCEPT_EXTRACTION_VERSION).toBe(16);
   });
 
-  it("stamps 15 on every concept it extracts", () => {
-    expect(extractUploadConcepts(doc).every((c) => c.extractionVersion === 15)).toBe(true);
+  it("stamps 16 on every concept it extracts", () => {
+    expect(extractUploadConcepts(doc).every((c) => c.extractionVersion === 16)).toBe(true);
   });
 });

@@ -40,11 +40,13 @@ export type HighlightTarget = ExplainSelection & { offset?: number };
  */
 export function canHighlight(
   target:
-    | { source?: ExplainSource; sectionIndex: number; paragraphIndex: number; passage: string; paragraphId?: string; spansBlocks?: boolean }
+    | { source?: ExplainSource; sectionIndex: number; paragraphIndex: number; passage: string; paragraphId?: string; spansBlocks?: boolean; segments?: ExplainSelection["segments"]; unavailableReason?: string }
     | null
     | undefined,
 ): boolean {
   if (!target) return false;
+  if (target.unavailableReason) return false;
+  if (target.segments) return target.segments.length > 0 && target.segments.every((s) => !!s.paragraphId && !!s.quote.trim() && Number.isInteger(s.start) && s.end > s.start);
   if (target.spansBlocks === true) return false;
   if (target.source !== undefined && target.source !== "paper") return target.passage.trim() !== "" && isPageBlockId(target.paragraphId);
   return (
@@ -92,6 +94,23 @@ export function highlightSelection(
   },
 ): { id: string; created: boolean } | null {
   if (!canHighlight(target)) return null;
+  if (target.segments) {
+    if (target.selectionStillHolds && !target.selectionStillHolds()) return null;
+    // Re-read provenance at the press: a detached/replaced block cannot silently
+    // persist an old selection even when its captured quote was once correct.
+    if (target.measure && !target.measure()) return null;
+    if (typeof document === "undefined" || target.segments.some((s) => !document.getElementById(s.paragraphId))) return null;
+    const had = readingNoteFor(useNotesStore.getState().notes, input.paper.id) !== undefined;
+    const noteId = useNotesStore.getState().ensureReadingNote(citableFromPaper(input.paper), { questions: input.questions, forYourQuestions: input.forYourQuestions });
+    const made = useNotesStore.getState().addHighlightGroup(noteId, { paperId: input.paper.id, segments: target.segments, ...(input.style === "bold" || input.style === "circle" ? { mark: input.style } : {}) });
+    if (!made) { if (!had) useNotesStore.getState().remove(noteId); return null; }
+    if (!made.created && input.style) useNotesStore.getState().setHighlightStyle(noteId, made.id, input.style);
+    const top = target.measure?.()?.bounds.top ?? target.bounds.top;
+    if (typeof window !== "undefined") window.getSelection()?.removeAllRanges();
+    if (!input.style || input.style === "highlight") useHighlightStrip.getState().show(made.id, top);
+    else useHighlightStrip.getState().hide();
+    return made;
+  }
   // P11-28: a block of the page — the words and the hint are the block's, read now; its id is the one the selection reported.
   const onPage = target.source !== undefined && target.source !== "paper";
   const page = onPage ? pageBlockWords(target) : null;
@@ -132,17 +151,19 @@ export function useHighlight({
   questions,
   forYourQuestions,
   body,
+  onUnavailable,
 }: {
   paper: Paper;
   questions?: readonly string[];
   forYourQuestions?: readonly QuestionAnswers[];
   /** The paper's body as the page renders it. */
   body?: readonly { paragraphs: readonly string[] }[];
+  onUnavailable?: (reason: string) => void;
 }): (target: HighlightTarget, style?: ReadingMarkStyle) => void {
   return useCallback(
     (target: HighlightTarget, style?: ReadingMarkStyle) => {
-      highlightSelection(target, { paper, questions, forYourQuestions, body, style });
+      if (!highlightSelection(target, { paper, questions, forYourQuestions, body, style })) onUnavailable?.(target.unavailableReason ?? "This selection changed. Select the text again.");
     },
-    [paper, questions, forYourQuestions, body],
+    [paper, questions, forYourQuestions, body, onUnavailable],
   );
 }

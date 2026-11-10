@@ -25,6 +25,8 @@ import { REPORT_STATUS } from "./copy";
 // replaces .novelty) and deleted "why it fits you" — a v5 report still has
 // the old two-block/fit shape and would render it for up to DEEP_TTL_MS
 // after upgrade without this bump.
+// P12-28: a persisted report can retain a bound PDF image URL from the old
+// caption producer. Rebuild this derived report on ordinary reopen once.
 // v9: R-BYOK-2 — a novelty line now needs a quoted sentence that states it; a v8
 // report may still carry an ungrounded "what is new here" line and would replay it
 // for up to DEEP_TTL_MS without this bump.

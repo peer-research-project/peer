@@ -34,8 +34,8 @@ describe("W8 R-H3: runtime directory paths are hidden from the file tracer", () 
 
   it("annotates every UPLOAD_DIR path call in upload-store.ts", async () => {
     const calls = runtimeDirCalls(await readFile(path.join(here, "upload-store.ts"), "utf8"));
-    // pdfPath, metaPath, docPath, and the sidecar rename.
-    expect(calls).toHaveLength(4);
+    // pdfPath, metaPath, docPath, the sidecar rename, asset rename and folder removal.
+    expect(calls).toHaveLength(7);
     expect(calls.filter((entry) => !entry.ignored)).toEqual([]);
   });
 });

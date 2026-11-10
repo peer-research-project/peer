@@ -539,6 +539,13 @@ describe("scan 5 — every route that can reach a model is behind requireAiReque
     // `requireAiRequest("paper-plain", 40)` in the same place as the explain route's.
     // The count moves from five to eight BECAUSE three spending routes were added
     // behind the guard, and the routes are named so a later drop shows as a name,
+    // not only a number.
+    //
+    // P12-53 (§1h.428), RE-AIMED: `papers/[id]/structure` — the model's review of the
+    // rules' structure asks the reader's model once per paper, gated
+    // `requireAiRequest("paper-structure", 20)` in the same place as the gist route's.
+    // The count moves from eight to nine BECAUSE a ninth spending route was added behind
+    // the guard.
     // not only a number. Own-key lane 3 (2026-10-28): `ai/check-key` — "Check key"
     // asks the reader's provider once whether it accepts their key, gated
     // `requireAiRequest("key-check", 10)` before the provider is resolved; eight to
@@ -551,6 +558,7 @@ describe("scan 5 — every route that can reach a model is behind requireAiReque
       "src/app/api/papers/[id]/explain/route.ts",
       "src/app/api/papers/[id]/paragraph-guide/route.ts",
       "src/app/api/papers/[id]/plain/route.ts",
+      "src/app/api/papers/[id]/structure/route.ts",
       "src/app/api/papers/report/route.ts",
       "src/app/api/papers/search/jev/route.ts",
       "src/app/api/test-digest/route.ts",

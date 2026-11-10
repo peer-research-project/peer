@@ -22,7 +22,7 @@ describe("paper page - a key saved, the reader signed out", () => {
   it("hands it to the sentence, and the sentence's memo is rebuilt when it changes", () => {
     const call = source.slice(source.indexOf("describeAvailability({"), source.indexOf("// The plate's own terms"));
     expect(call).toContain("keyNeedsSignIn: signInForKey,");
-    expect(call).toMatch(/\[reading, availability, providerConfigured, profileHasProject, model\.failed, signInForKey\]/);
+    expect(call).toMatch(/\[reading, availability, providerConfigured, profileHasProject, model\.failed, wait, signInForKey\]/);
   });
 
   const details = source.slice(source.indexOf('<DecisionBlock\n            part="details"'), source.indexOf('<DecisionBlock part="progress"'));

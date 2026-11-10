@@ -1,20 +1,15 @@
 "use client";
 
-// On desktop, the sticky sidebar contains the paper outline; title, actions,
-// bibliographic details, tabs and article share one reading column. On a
-// phone the blocks remain in their existing single-column reading order.
-// The map and common question field stay outside the tab panel so switching
-// views does not reset them. The chosen structure follows visual DOM order.
-// Crossing the desktop breakpoint remounts the blocks, as it did before.
-
-import { useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
+import { Fragment, useRef, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
+import { useKeepPlace } from "@/lib/reader/keep-place";
 import "./reader-compact.css";
 import { fitZoom, READING_SCALE_STEPS, useReadingPrefsStore } from "@/store/reading-prefs";
 import { TABPANEL_ID, tabId } from "./reader-tabs";
 import { ReaderShell } from "./reader-shell";
 import { ReadingControls } from "./reading-controls";
-import { SPREAD_QUERY } from "./spread";
 import type { ReaderTab } from "./use-reader-tab";
+import { railMinimumWidth } from "./pane-layout";
+import { ResponsiveMargin } from "./responsive-margin";
 
 /** The id of the wrapper that holds the blocks both tabs share. */
 export const COMMON_ID = "reader-common";
@@ -59,24 +54,16 @@ interface ReaderLayoutProps {
   next: ReactNode;
 }
 
-function subscribe(onChange: () => void) {
-  const media = window.matchMedia(SPREAD_QUERY);
-  media.addEventListener("change", onChange);
-  return () => media.removeEventListener("change", onChange);
-}
-
 /**
- * ≥ 64rem (1024 css px, the three panes), by the window. Safe to read on the first render: `Reader` mounts
+ * Comfortable room for a rail, text and margin at the current reading step. Safe to read on the first render: `Reader` mounts
  * only once the paper is known, which is after `StoreHydrator` rehydrates
  * (all stores are `skipHydration`) or after the by-id fetch — never during
  * SSR or hydration. The server snapshot is the one-column page regardless.
  */
 export function useSpread(): boolean {
-  return useSyncExternalStore(
-    subscribe,
-    () => window.matchMedia(SPREAD_QUERY).matches,
-    () => false,
-  );
+  const readingScale = useResolvedReadingScale();
+  const width = useSyncExternalStore(subscribeResize, () => document.documentElement.clientWidth, () => 0);
+  return width >= railMinimumWidth(readingScale);
 }
 
 function subscribeResize(onChange: () => void) {
@@ -131,6 +118,10 @@ export function usePageZoom(): number {
 const ZONE_INSET = "px-1.5";
 
 export function ReaderLayout(p: ReaderLayoutProps) {
+  // P12-15: the owner outlives both structures. Its last stable logical token
+  // survives CSS reflow, the temporary shell and native clamp event ordering.
+  const owner = useRef<HTMLDivElement | null>(null);
+  useKeepPlace(owner, { responsive: true });
   // S15/S21: read here, not threaded as a prop from page.tsx — this file
   // already self-contains its other layout-affecting state (`useSpread`),
   // so the reading-size scale follows the same shape. Sets --reading-scale
@@ -144,73 +135,55 @@ export function ReaderLayout(p: ReaderLayoutProps) {
   const tabbed = p.tabs !== undefined && p.tabs !== null;
   // Built from the slot alone — the tab is not read here, on purpose (see the header).
   const common = p.common ? (
-    <div id={COMMON_ID} className="reading-scaled scroll-mt-20" style={readingScaleStyle}>{p.common}</div>
+    <div key="common" id={COMMON_ID} className="reading-scaled scroll-mt-20" style={readingScaleStyle}>{p.common}</div>
   ) : null;
   const blocks = (
-    <>
+    <Fragment key="panel">
       <div className="reading-scaled" style={readingScaleStyle}>{p.words}</div>
       <div className="reading-scaled" style={readingScaleStyle}>{p.additions}</div>
-    </>
+    </Fragment>
   );
 
-  if (!p.spread) {
-    // One column: the blocks in reading order. `words` and `additions` each get
-    // a thin scale wrapper of their own — the decision and the strip are not scaled.
-    const panel = tabbed ? (
-      // `flow-root`: the first block's own top gap (the map's 24px, a band's 48px) stays inside the panel
-      // instead of collapsing out through it, so the panel's box begins at the strip's foot (P9-04, X3).
-      <div role="tabpanel" id={TABPANEL_ID} aria-labelledby={p.tab ? tabId(p.tab) : undefined} className="scroll-mt-20 flow-root">{blocks}</div>
-    ) : (
-      blocks
-    );
-    return (
-      <>
-        {p.plate}
-        {p.title}
-        {p.decision}
-        {p.details}
-        {p.progress}
-        {common}
-        {/* P9-04 (X3): the strip stands directly above the panel it switches (`aria-controls`),
-            after the blocks both tabs share — not four screens above it. */}
-        <div id="reader-book-toolbar-slot">{p.bookHint}</div>
-        {p.tabs}
-        {/* P10-04 (review 3.1): the map, directly under the strip it stands with and above the panel it
-            helps the reader move through; outside the panel, so it shows under both tabs. */}
-        {p.map}
-        {panel}
-        {p.next}
-      </>
-    );
-  }
-
-  // The three panes (P11-16). The tabpanel is a flex column, as the old spread's was, so the first block's own top gap stays inside it.
   const panel = tabbed ? (
-    <div role="tabpanel" id={TABPANEL_ID} aria-labelledby={p.tab ? tabId(p.tab) : undefined} className="scroll-mt-20 flex flex-col">
-      {blocks}
+    <div key="panel" role="tabpanel" id={TABPANEL_ID} aria-labelledby={p.tab ? tabId(p.tab) : undefined}
+      className={p.spread ? "scroll-mt-20 flex flex-col" : "scroll-mt-20 flow-root"}>{blocks}</div>
+  ) : blocks;
+  const wrap = (children: ReactNode) => (
+    <div data-reader-layout="" ref={owner} style={{ display: "contents" }}>
+      {children}
     </div>
-  ) : (
-    blocks
   );
-
-  return (
-    <ReaderShell
+  // P12-15: the SAME keyed centre ancestry stands in both modes. Removing or
+  // reparenting it changes native Range endpoints even when text nodes survive.
+  const preamble = (
+    <>{p.plate}{p.title}{p.decision}{p.details}{p.progress}<div id="reader-book-toolbar-slot">{p.bookHint}</div></>
+  );
+  const navigation = (
+    <>{p.tabs}{p.map}</>
+  );
+  return wrap(
+    <><ReaderShell
+      side={p.spread}
+      keepReadingPlace={false}
       left={{ whole: <div className={ZONE_INSET}>{p.map ?? <div className="reader-outline-empty"><span>Contents</span><p>No outline available</p></div>}</div> }}
       centre={
-        <div className="reader-document">
-          <div className="reader-document-tools"><ReadingControls spread /></div>
-          <div className="reader-document-title">{p.title}</div>
-          <div className="reader-document-commands">{p.decision}</div>
-          <div className="reader-document-details">{p.details}</div>
-          {p.progress}
-          <div id="reader-book-toolbar-slot">{p.bookHint}</div>
-          {p.tabs}
+        <div key="reading-content" className={p.spread ? "reader-document" : undefined}>
+          {!p.spread ? <Fragment key="preamble">{preamble}</Fragment> : <>
+            <div className="reader-document-tools"><ReadingControls spread /></div>
+            <div className="reader-document-title">{p.title}</div>
+            <div className="reader-document-commands">{p.decision}</div>
+            <div className="reader-document-details">{p.details}</div>
+            {p.progress}
+            <div id="reader-book-toolbar-slot">{p.bookHint}</div>
+            {p.tabs}
+          </>}
           {common}
+          {!p.spread ? <Fragment key="navigation">{navigation}</Fragment> : null}
           {panel}
-          {p.plate && <div className="reader-document-figure">{p.plate}</div>}
-          <div>{p.next}</div>
+          {p.spread && p.plate ? <div className="reader-document-figure">{p.plate}</div> : null}
+          <div key="next">{p.next}</div>
         </div>
       }
-    />
+    /><ResponsiveMargin side={p.spread} /></>
   );
 }

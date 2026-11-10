@@ -210,7 +210,7 @@ describe("the first visit (D6, amended by ruling §1h.115 item 4): pinned at eve
     }
   });
 
-  it("a first visit that resizes from 1440 down to 1024 stays pinned all the way", () => {
+  it("a first visit keeps the sidebar pinned at 1024 and wider", () => {
     const page = open();
     for (const width of [1280, 1143, 1093, 1024]) {
       env.resizeTo(width);
@@ -241,7 +241,9 @@ describe("a window too narrow for the remembered widths", () => {
     expect(useReaderPanesStore.getState()).toMatchObject({ leftWidth: 400, marginWidth: 450 });
   });
 
-  it("hands each divider the room the other pane leaves, so the centre keeps its 440 px", () => {
+  // Re-aimed (P12-95 rule 2, the owner's O1; ruling §1h.484): was "hands each divider the scaled centre budget" - `centreMinimum: 500`, the
+  // reading budget at the default step. A divider's range is what a reader may DRAG to, so its room is the drag floor, 434 at this step.
+  it("hands each divider the scaled drag floor as well as the other pane", () => {
     useReaderPanesStore.setState({ leftPinned: true });
     const [left] = open().look().dividers;
     expect(left.props.room).toEqual({ viewport: 1440, other: 0 });

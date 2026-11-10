@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
+import { READING_VERSION } from "@/components/reader/use-reading";
 import { AnchorMarker, PASSAGE_LOST_LINE, SQUARE_COLOR, passageIsLost, storedBodyOf } from "./note-tags";
 
 // P10-36 (rule 1; P10-35's unsettled (b)): a note whose passage is found nowhere in the paper has no tag in it, so its
@@ -48,7 +49,7 @@ describe("passageIsLost — the sticky whose passage the paper holds nowhere", (
 describe("storedBodyOf — the body of the paper's reading kept in this browser", () => {
   // re-aimed (§1c): an entry now carries the version and a recent time, which the gates below need (same cases as before)
   const NOW = 1_800_000_000_000;
-  const entry = (ts: number, paragraphs: string[], version = 19) => ({ ts: NOW - 1000 * ts, reading: { version, sourceFingerprint: "", body: [{ paragraphs }] } });
+  const entry = (ts: number, paragraphs: string[], version: number = READING_VERSION) => ({ ts: NOW - 1000 * ts, reading: { version, sourceFingerprint: "", body: [{ paragraphs }] } });
   const store = (value: unknown, current = "p1|public|") => ({ getItem: (key: string) => key.startsWith("peer-reading-current-v1:") ? current : (typeof value === "string" ? value : JSON.stringify(value)) });
 
   it("uses the current reading identity and no other paper's", () => {
@@ -61,13 +62,13 @@ describe("storedBodyOf — the body of the paper's reading kept in this browser"
     expect(storedBodyOf("p1", store({}), NOW)).toBeNull();
     expect(storedBodyOf("p1", store("{not json"), NOW)).toBeNull();
     expect(storedBodyOf("p1", { getItem: () => { throw new Error("blocked"); } }, NOW)).toBeNull();
-    expect(storedBodyOf("p1", store({ "p1|public|": { ts: NOW, reading: { version: 19, sourceFingerprint: "", body: "x" } } }), NOW)).toBeNull();
-    expect(storedBodyOf("p1", store({ "p1|public|": { ts: NOW, reading: { version: 19, sourceFingerprint: "", body: [{ paragraphs: [3] }] } } }), NOW)).toBeNull();
+    expect(storedBodyOf("p1", store({ "p1|public|": { ts: NOW, reading: { version: READING_VERSION, sourceFingerprint: "", body: "x" } } }), NOW)).toBeNull();
+    expect(storedBodyOf("p1", store({ "p1|public|": { ts: NOW, reading: { version: READING_VERSION, sourceFingerprint: "", body: [{ paragraphs: [3] }] } } }), NOW)).toBeNull();
   });
 
   // P10-36 (the manager's fix): a cached reading is used only as `use-reading.ts` uses it — the current version, inside a day.
   it("does not know a reading of another version: its body may be an older split, and a repaired note must not be called lost by it", () => {
-    const stale = { "p1|public|": entry(10, ["Creep limits the life of hot parts."], 11) };
+    const stale = { "p1|public|": entry(10, ["Creep limits the life of hot parts."], 15) };
     expect(storedBodyOf("p1", store(stale), NOW)).toBeNull();
     expect(passageIsLost(ANCHOR, "h2", {}, storedBodyOf("p1", store(stale), NOW))).toBe(false);
     // and the newer entry wins over an older-version one, not the other way round
@@ -76,11 +77,11 @@ describe("storedBodyOf — the body of the paper's reading kept in this browser"
 
   it("does not know a reading older than a day (the page would fetch it again), and uses one just inside the day", () => {
     const DAY = 24 * 60 * 60 * 1000;
-    const aged = (age: number) => ({ "p1|public|": { ts: NOW - age, reading: { version: 19, sourceFingerprint: "", body: [{ paragraphs: ["x"] }] } } });
+    const aged = (age: number) => ({ "p1|public|": { ts: NOW - age, reading: { version: READING_VERSION, sourceFingerprint: "", body: [{ paragraphs: ["x"] }] } } });
     expect(storedBodyOf("p1", store(aged(DAY)), NOW)).toBeNull();
     expect(passageIsLost(ANCHOR, "h2", {}, storedBodyOf("p1", store(aged(DAY + 1)), NOW))).toBe(false);
     expect(storedBodyOf("p1", store(aged(DAY - 1)), NOW)).toEqual([{ paragraphs: ["x"] }]);
-    expect(storedBodyOf("p1", store({ "p1|public|": { reading: { version: 19, sourceFingerprint: "", body: [{ paragraphs: ["x"] }] } } }), NOW)).toBeNull();
+    expect(storedBodyOf("p1", store({ "p1|public|": { reading: { version: READING_VERSION, sourceFingerprint: "", body: [{ paragraphs: ["x"] }] } } }), NOW)).toBeNull();
   });
 
   it("uses the reader's shared cache gates", () => {
@@ -134,19 +135,19 @@ describe("AnchorLink — the wiring", () => {
 
 
 it("ignores a body cached under a different source fingerprint", () => {
-  const storage = { getItem: (key: string) => key.startsWith("peer-reading-current-v1:") ? "p1|public||source:new" : key === "peer-reading-v4" ? JSON.stringify({ "p1|public||source:new": { ts: Date.now(), reading: { version: 19, sourceFingerprint: "old", body: [{ paragraphs: ["stale"] }] } } }) : null };
+  const storage = { getItem: (key: string) => key.startsWith("peer-reading-current-v1:") ? "p1|public||source:new" : key === "peer-reading-v4" ? JSON.stringify({ "p1|public||source:new": { ts: Date.now(), reading: { version: READING_VERSION, sourceFingerprint: "old", body: [{ paragraphs: ["stale"] }] } } }) : null };
   expect(storedBodyOf("p1", storage)).toBeNull();
 });
 
 
 it("reads the current fingerprinted cache for note passages", () => {
-  const storage = { getItem: (key: string) => key.startsWith("peer-reading-current-v1:") ? "p1|public||source:abc" : key === "peer-reading-v4" ? JSON.stringify({ "p1|public||source:abc": { ts: Date.now(), reading: { version: 19, sourceFingerprint: "abc", body: [{ paragraphs: ["current"] }] } } }) : null };
+  const storage = { getItem: (key: string) => key.startsWith("peer-reading-current-v1:") ? "p1|public||source:abc" : key === "peer-reading-v4" ? JSON.stringify({ "p1|public||source:abc": { ts: Date.now(), reading: { version: READING_VERSION, sourceFingerprint: "abc", body: [{ paragraphs: ["current"] }] } } }) : null };
   expect(storedBodyOf("p1", storage)).toEqual([{ paragraphs: ["current"] }]);
 });
 
 
 it.each(["p1|public||source:new", "p1|upload:abcd|2"])("does not mark a note lost from an old cached reading when %s is current", (current) => {
-  const old = { "p1|public||source:old": { ts: Date.now(), reading: { version: 19, sourceFingerprint: "old", body: [{ paragraphs: ["different old text"] }] } } };
+  const old = { "p1|public||source:old": { ts: Date.now(), reading: { version: READING_VERSION, sourceFingerprint: "old", body: [{ paragraphs: ["different old text"] }] } } };
   const storage = { getItem: (key: string) => key.startsWith("peer-reading-current-v1:") ? current : JSON.stringify(old) };
   const body = storedBodyOf("p1", storage);
   expect(body).toBeNull();
@@ -154,7 +155,7 @@ it.each(["p1|public||source:new", "p1|upload:abcd|2"])("does not mark a note los
 });
 
 it("treats a missing current identity as unknown", () => {
-  const storage = { getItem: (key: string) => key.startsWith("peer-reading-current-v1:") ? null : JSON.stringify({ "p1|public|": { ts: Date.now(), reading: { version: 19, sourceFingerprint: "", body: [] } } }) };
+  const storage = { getItem: (key: string) => key.startsWith("peer-reading-current-v1:") ? null : JSON.stringify({ "p1|public|": { ts: Date.now(), reading: { version: READING_VERSION, sourceFingerprint: "", body: [] } } }) };
   expect(storedBodyOf("p1", storage)).toBeNull();
 });
 
@@ -167,7 +168,7 @@ it.each([
   ["empty paragraphs", [{ paragraphs: [] }], "none"],
 ])("treats %s current reading as unknown, not a lost passage", (_label, body, fullText) => {
   const key = "p1|public||source:abc";
-  const storage = { getItem: (name: string) => name.startsWith("peer-reading-current-v1:") ? key : JSON.stringify({ [key]: { ts: Date.now(), reading: { version: 19, sourceFingerprint: "abc", body, provenance: { fullText } } } }) };
+  const storage = { getItem: (name: string) => name.startsWith("peer-reading-current-v1:") ? key : JSON.stringify({ [key]: { ts: Date.now(), reading: { version: READING_VERSION, sourceFingerprint: "abc", body, provenance: { fullText } } } }) };
   const stored = storedBodyOf("p1", storage);
   expect(stored).toBeNull();
   expect(passageIsLost(ANCHOR, "h2", {}, stored)).toBe(false);
@@ -177,6 +178,6 @@ it.each([
 
 it("uses a current readable changed body to detect a missing passage", () => {
   const key = "p1|public||source:abc";
-  const storage = { getItem: (name: string) => name.startsWith("peer-reading-current-v1:") ? key : JSON.stringify({ [key]: { ts: Date.now(), reading: { version: 19, sourceFingerprint: "abc", body: OTHER } } }) };
+  const storage = { getItem: (name: string) => name.startsWith("peer-reading-current-v1:") ? key : JSON.stringify({ [key]: { ts: Date.now(), reading: { version: READING_VERSION, sourceFingerprint: "abc", body: OTHER } } }) };
   expect(passageIsLost(ANCHOR, "h2", {}, storedBodyOf("p1", storage))).toBe(true);
 });
