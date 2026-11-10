@@ -187,3 +187,15 @@ describe("rule 3 — the one sentence, only when no provider is on", () => {
     expect(noSignInProvider(signInProvidersToShow(null))).toBe(false);
   });
 });
+
+describe("D-AUTH-PROV-1 — the line above the buttons names only what is drawn", () => {
+  it("one sentence per case, GitHub first; none on is no sentence", async () => {
+    const { signInSentence } = await import("./sign-in-providers");
+    const tail = "to sync saves and reads across your devices.";
+    expect(signInSentence({ github: true, google: true })).toBe(`Sign in with GitHub or Google ${tail}`);
+    expect(signInSentence({ github: true, google: false })).toBe(`Sign in with GitHub ${tail}`);
+    expect(signInSentence({ github: false, google: true })).toBe(`Sign in with Google ${tail}`);
+    expect(signInSentence({ github: false, google: false })).toBeNull();
+    expect(signInSentence(signInProvidersToShow(null))).toBe(`Sign in with GitHub or Google ${tail}`);
+  });
+});

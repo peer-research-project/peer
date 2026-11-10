@@ -46,6 +46,7 @@ import {
   SIGN_IN_NOT_SET_UP,
   noSignInProvider,
   signInProvidersToShow,
+  signInSentence,
   useSignInProviders,
   type SignInProviderFlags,
 } from "@/lib/supabase/sign-in-providers";
@@ -277,6 +278,10 @@ export interface AccountSectionViewProps {
   signInReturnTo?: string;
   onSignInGitHub: (returnTo?: string) => void;
   onSignInGoogle: (returnTo?: string) => void;
+  /** D-AUTH-PROV-1 — the project's sign-in providers (`useSignInProviders`),
+   *  null while unknown; the signed-out line names only those that are on.
+   *  Handed in, so this view stays hook-free. */
+  signInProviders?: SignInProviderFlags | null;
   /** Wired to the plain "Sign out" form's `onSubmit`. Whether it actually
    *  intercepts the submit (vs. letting the real `POST /auth/signout` go
    *  through, unchanged from today) is entirely the wrapper's decision —
@@ -296,10 +301,12 @@ export function AccountSectionView({
   signInReturnTo,
   onSignInGitHub,
   onSignInGoogle,
+  signInProviders = null,
   onSignOutSubmit,
   onStaySignedIn,
 }: AccountSectionViewProps) {
   if (authKind === "unconfigured" || authKind === "loading") return null;
+  const sentence = signInSentence(signInProvidersToShow(signInProviders));
 
   return (
     <section className={className} aria-labelledby="account-heading">
@@ -309,9 +316,7 @@ export function AccountSectionView({
 
       {authKind === "signed-out" ? (
         <>
-          <p className="mt-1 text-meta text-text-muted max-w-[52ch]">
-            Sign in with GitHub or Google to sync saves and reads across your devices.
-          </p>
+          {sentence && <p className="mt-1 text-meta text-text-muted max-w-[52ch]">{sentence}</p>}
           <div className="mt-4 flex flex-wrap gap-2">
             <SignInButtons
               busy={busy}
@@ -467,6 +472,8 @@ export function AccountSection({ className = "" }: { className?: string }) {
   // `useRef(false)` already has exactly the `{ current: boolean }` shape
   // `SignOutGuard` needs — passed directly below, not `.current`.
   const signOutGuardRef = useRef(false);
+  // D-AUTH-PROV-1 — the same one answer the buttons below read.
+  const signInProviders = useSignInProviders();
 
   // ACCOUNT-SWITCH (ABC-JEV-INTEGRATION.md §1bt point 3) — "flush first,
   // warn only on failure." Always intercepts: whether anything on the
@@ -521,6 +528,7 @@ export function AccountSection({ className = "" }: { className?: string }) {
         setBusy(true);
         void signInWithGoogle(to);
       }}
+      signInProviders={signInProviders}
       onSignOutSubmit={handleSignOutSubmit}
       onStaySignedIn={() => setPendingSignOut("none")}
     />
