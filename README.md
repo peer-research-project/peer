@@ -59,7 +59,7 @@ The separate [`python/`](python/) directory contains the original local-first CL
 
 ## Project resources
 
-- [Product direction](docs/PRODUCT_DIRECTION.md) and [vision](VISION.md)
+- [Documentation index](docs/README.md), [product direction](docs/PRODUCT_DIRECTION.md), and [vision](VISION.md)
 - [Contributor guide](CONTRIBUTOR_GUIDE.md) and [project rules](AGENTS.md)
 - [Contributor license agreement](docs/CLA.md) and [third-party notices](docs/THIRD_PARTY_NOTICES.md)
 

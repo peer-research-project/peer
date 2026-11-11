@@ -275,7 +275,7 @@ Code against the `DigestProvider` interface — **never against a single SDK dir
   3. `null` → Tier 0 fallback.
 - Vercel preview and production ignore operator model credentials even if someone adds
   them by mistake. The build guard also rejects that deployment configuration.
-- The digest model default is `claude-haiku-4-5-20251001` ([`llm/client.ts`](web/src/lib/llm/client.ts)).
+- The Anthropic small model is `claude-haiku-4-5-20251001`; provider model defaults are listed in [`provider-models.ts`](web/src/lib/llm/provider-models.ts).
 - Two model sizes per provider: a **small** model (classify/compress) and a **large** model
   (extract/synthesize) — used by deep reports below.
 - **Check key**, under the model-key field ([`key-check.tsx`](web/src/components/profile/key-check.tsx)),
@@ -302,7 +302,7 @@ Per-paper "deep report" turns a paper into a one-glance mini-dashboard
    evidence and an explicit novelty line per result. Review/survey papers get a different schema.
 
 Full text is fetched HTML-first, PDF as fallback ([`full-text.ts`](web/src/lib/papers/full-text.ts),
-`html-text.ts`, `pdf-text.ts` — the last shells out to Python via `PYTHON_BIN`). Paywalled
+`html-text.ts`, `pdf-text.ts` — PDF text extraction uses `unpdf` and TypeScript). Paywalled
 papers gracefully fall back to an abstract-only report **with a notice banner**
 (`buildPaywalledFallback`) — never an error.
 
@@ -394,22 +394,24 @@ Peer runs no web search.)
 
 ### Themes
 
-Six color themes: `system`, `cream`, `white`, `black`, `pink`, `blue`. Applied via CSS
-variables in [`lib/theme.ts`](web/src/lib/theme.ts) (`applyColorTheme`), persisted on the
-profile (`color_theme`), and synced by [`theme-sync.tsx`](web/src/components/theme-sync.tsx).
+Themes combine a mode (`system`, `light`, or `dark`) with an accent (`ember`, `rose`,
+`marigold`, `sage`, `indigo`, or `violet`). They are applied via CSS variables in
+[`lib/theme.ts`](web/src/lib/theme.ts) (`applyColorTheme`), persisted on the profile
+(`color_theme`), and synced by [`theme-sync.tsx`](web/src/components/theme-sync.tsx).
 Use the semantic CSS variables (`bg`, `surface`, `text`, `heading`, `accent`, `border`, …) —
 **never hard-code colors** if you want themes to keep working.
 
 ### State management
 
-Three Zustand stores ([`web/src/store/`](web/src/store/)), all with optimistic local writes
-and fire-and-forget cloud sync:
+Zustand stores live in [`web/src/store/`](web/src/store/). The profile, feed, notes,
+reading preferences, and reader panes have separate stores. The main ones include:
 
 - [`profile.ts`](web/src/store/profile.ts) — the user profile (topics, knobs, keys, ledger,
   digest prefs, theme, onboarding flag). `hydrateFromRemote` merges a server snapshot
   (undefined fields keep local values). Persisted under `peer-profile`.
 - [`feed.ts`](web/src/store/feed.ts) — papers (jobs and events were removed), loading, read items, AI-search toggle.
-- [`ui.ts`](web/src/store/ui.ts) — transient UI state.
+- [`notes.ts`](web/src/store/notes.ts) — notes and annotations.
+- [`reading-prefs.ts`](web/src/store/reading-prefs.ts) and [`reader-panes.ts`](web/src/store/reader-panes.ts) — reading appearance and pane preferences.
 
 Sync components: `profile-sync.tsx`, `feed-sync.tsx`, `theme-sync.tsx`.
 
@@ -501,7 +503,7 @@ to be throttled), `OPENALEX_EMAIL`, `UNPAYWALL_EMAIL` (polite-pool emails).
 
 **Email digest:** `RESEND_API_KEY`, `DIGEST_FROM_EMAIL`.
 
-**Misc:** `NEXT_PUBLIC_SITE_URL`, `CRON_SECRET`, `PYTHON_BIN` (for PDF extraction shell-out).
+**Misc:** `NEXT_PUBLIC_SITE_URL`, `CRON_SECRET`, `PYTHON_BIN` (optional for PDF parity tests).
 
 ### Running the web app
 

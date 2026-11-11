@@ -59,7 +59,7 @@ npm run build
 
 ## 项目资料
 
-- [产品方向](docs/PRODUCT_DIRECTION.md)与[产品愿景](VISION.md)
+- [文档目录](docs/README.md)、[产品方向](docs/PRODUCT_DIRECTION.md)与[产品愿景](VISION.md)
 - [开发者指南](CONTRIBUTOR_GUIDE.md)与[项目规则](AGENTS.md)
 - [贡献者许可协议](docs/CLA.md)与[第三方组件声明](docs/THIRD_PARTY_NOTICES.md)
 
