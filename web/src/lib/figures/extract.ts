@@ -1,3 +1,4 @@
+import { publicFetch } from "@/lib/security/public-fetch";
 import { extractPdfCandidatesFromPath, tryPdfCandidates } from "./pdf-extract";
 import { classifyHardAccessStatus } from "@/lib/papers/paywall-status";
 import { bareUploadId, claimsUploadId, withUploadPdfFile } from "@/lib/papers/upload-store";
@@ -137,7 +138,7 @@ async function timedFetch(url: string, init?: RequestInit): Promise<Response | n
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
-    return await fetch(url, {
+    return await publicFetch(url, {
       ...init,
       signal: controller.signal,
       cache: "no-store",

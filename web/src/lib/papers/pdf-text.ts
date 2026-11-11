@@ -1,3 +1,4 @@
+import { publicFetch } from "@/lib/security/public-fetch";
 // Reads a PDF into the same shape as the HTML extractors — a legal PDF
 // downloaded from a link, or a private upload already in its storage (disk or a
 // private bucket).
@@ -77,7 +78,7 @@ async function downloadPdf(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
-    const res = await fetch(url, {
+    const res = await publicFetch(url, {
       signal: controller.signal,
       cache: "no-store",
       headers: {

@@ -12,6 +12,7 @@
 import { useSyncExternalStore } from "react";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import { getNotesJournal } from "./notes-storage-runtime";
 import type { Block, Citable, HighlightColourId, Note, PassageSegment, ReadingMarkStyle } from "@/lib/notes/types";
 import { anchorBlocks, anchorTextOnShow, blockAt, isPageBlockId, parseAnchorId, type AnchorSection } from "@/lib/notes/anchor-blocks";
 import {
@@ -514,8 +515,19 @@ export function migrateNotes(persisted: unknown, version: number): unknown {
 }
 
 export const useNotesStore = create<NotesState>()(
-  persist(
-    (set, get) => ({
+  persist<NotesState, [], [], Pick<NotesState, "notes">>(
+    (persistSet, get) => {
+      // Write the prospective state before Zustand mutates in-memory data.
+      const set: typeof persistSet = ((update: unknown, replace?: boolean) => {
+        const patch = typeof update === "function" ? (update as (s: NotesState) => Partial<NotesState>)(get()) : update as Partial<NotesState>;
+        if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+          if (!useNotesStore.persist.hasHydrated()) throw new Error("Notes are still loading");
+          const next = replace ? patch : { ...get(), ...patch };
+          getNotesJournal(migrateNotes).setItem("peer-notes", JSON.stringify({ state: { notes: next.notes }, version: NOTES_STORE_VERSION }));
+        }
+        return persistSet(patch as NotesState, replace as false);
+      }) as typeof persistSet;
+      return ({
       notes: {},
       restoreHighlightGroup: (noteId, block) => {
         const spot = readHighlight(block);
@@ -739,9 +751,17 @@ export const useNotesStore = create<NotesState>()(
           if (blocks.length === note.blocks.length) return s;
           return { notes: { ...s.notes, [noteId]: { ...note, blocks, updatedAt: new Date().toISOString() } } };
         }),
-    }),
+    });
+    },
     {
       name: "peer-notes",
+      storage: {
+        getItem: async () => JSON.parse(await getNotesJournal(migrateNotes).getItem()),
+        setItem: (name, value) => {
+          if (typeof window !== "undefined" && typeof window.addEventListener === "function") getNotesJournal(migrateNotes).setItem(name, JSON.stringify(value));
+        },
+        removeItem: () => { throw new Error("Clear individual notes instead"); },
+      },
       version: NOTES_STORE_VERSION,
       migrate: migrateNotes as (persisted: unknown, version: number) => NotesState,
       skipHydration: true,
@@ -749,6 +769,17 @@ export const useNotesStore = create<NotesState>()(
     },
   ),
 );
+
+const persistedSetState = useNotesStore.setState;
+useNotesStore.setState = ((update: unknown, replace?: boolean) => {
+  const patch = typeof update === "function" ? (update as (s: NotesState) => Partial<NotesState>)(useNotesStore.getState()) : update as Partial<NotesState>;
+  if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+    if (!useNotesStore.persist.hasHydrated()) throw new Error("Notes are still loading");
+    const next = replace ? patch : { ...useNotesStore.getState(), ...patch };
+    getNotesJournal(migrateNotes).setItem("peer-notes", JSON.stringify({ state: { notes: next.notes }, version: NOTES_STORE_VERSION }));
+  }
+  return persistedSetState(patch as NotesState, replace as false);
+}) as typeof useNotesStore.setState;
 
 export function useNotesHydrated(): boolean {
   return useSyncExternalStore(

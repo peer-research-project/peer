@@ -8,13 +8,14 @@
 import { usePathname, useRouter } from "next/navigation";
 import { isUntouched } from "@/lib/notes/blocks";
 import { blankNote } from "@/lib/notes/templates";
-import { newestFirst, useNotesStore } from "@/store/notes";
+import { newestFirst, useNotesHydrated, useNotesStore } from "@/store/notes";
 import { cn } from "@/lib/cn";
 import { WriteGlyph } from "@/components/shell/icons";
 
 export function WriteButton() {
   const router = useRouter();
   const add = useNotesStore((s) => s.add);
+  const notesReady = useNotesHydrated();
   const here = usePathname()?.startsWith("/notes/") ?? false;
 
   const write = () => {
@@ -27,6 +28,7 @@ export function WriteButton() {
   return (
     <button
       type="button"
+      disabled={!notesReady}
       onClick={write}
       aria-current={here ? "page" : undefined}
       title="Write a note"

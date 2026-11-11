@@ -1,3 +1,4 @@
+import { publicFetch } from "@/lib/security/public-fetch";
 // Full-text orchestrator for deep paper reports.
 //
 // Given a paper identifier, walks the prioritized source-link list and
@@ -80,7 +81,7 @@ async function fetchHtml(url: string): Promise<{ ok: true; html: string; finalUr
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
-    const res = await fetch(url, {
+    const res = await publicFetch(url, {
       signal: controller.signal,
       cache: "no-store",
       headers: {

@@ -1,3 +1,4 @@
+import { publicFetch } from "@/lib/security/public-fetch";
 // Adapted from DeerFlow's MIT-licensed PDF-first retrieval approach.
 // See docs/THIRD_PARTY_NOTICES.md.
 
@@ -110,7 +111,7 @@ async function fetchPdfResponse(url: string): Promise<{ response: Response; byte
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
   try {
-    const response = await fetch(url, {
+    const response = await publicFetch(url, {
       signal: controller.signal,
       cache: "no-store",
       redirect: "follow",

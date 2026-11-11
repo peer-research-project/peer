@@ -15,9 +15,11 @@ import { useNotesHydrated, useNotesStore } from "@/store/notes";
 import "./notes-design.css";
 
 export default function NotePage() {
-  const { id = "" } = useParams<{ id: string }>();
+  const { id: encodedId = "" } = useParams<{ id: string }>();
+  let id = encodedId;
+  try { id = decodeURIComponent(encodedId); } catch { /* Preserve an invalid literal id. */ }
   const ready = useNotesHydrated();
-  const note = useNotesStore((s) => s.notes[id]);
+  const note = useNotesStore((s) => s.notes[encodedId] ?? s.notes[id]);
 
   return (
     // The board's width: the note keeps its own measure, and the room around

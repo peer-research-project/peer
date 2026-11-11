@@ -99,7 +99,7 @@ export function SavedPageView({
       <div id="shelf-notes" tabIndex={-1} className="scroll-mt-20">
       <Band label="Notes" gap="none">
         <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2">
-          <button type="button" className={COMMAND} onClick={onNewNote}>
+          <button type="button" className={COMMAND} disabled={!notesReady} onClick={onNewNote}>
             + New note
           </button>
           {notesReady && list.length === 0 && (

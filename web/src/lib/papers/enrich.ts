@@ -1,3 +1,4 @@
+import { publicFetch } from "@/lib/security/public-fetch";
 // Bounded, deterministic abstract retrieval. Third-party text is data, never instructions.
 import { cleanDisplayText } from "@/lib/text/clean";
 import { fetchSemanticScholar } from "@/lib/sources/semantic-scholar-client";
@@ -126,7 +127,7 @@ async function boundedFetch(url: string, deadline: number): Promise<Response | n
     const remaining = deadline - Date.now();
     if (remaining <= 0) return null;
     try {
-      const res = await fetch(next, { redirect: "manual", cache: "no-store", signal: AbortSignal.timeout(Math.max(1, Math.min(ATTEMPT_MS, remaining))), headers: { "User-Agent": "PeerBot/0.1", Accept: "text/html,application/json" } });
+      const res = await publicFetch(next, { redirect: "manual", cache: "no-store", signal: AbortSignal.timeout(Math.max(1, Math.min(ATTEMPT_MS, remaining))), headers: { "User-Agent": "PeerBot/0.1", Accept: "text/html,application/json" } });
       if (![301, 302, 303, 307, 308].includes(res.status)) return res;
       const location = res.headers.get("location");
       await res.body?.cancel();

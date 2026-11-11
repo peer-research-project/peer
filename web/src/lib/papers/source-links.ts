@@ -1,3 +1,4 @@
+import { publicFetch } from "@/lib/security/public-fetch";
 // Source-link discovery for legal full-text. Given a paper's identifier
 // (DOI / arXiv ID / OpenAlex ID / canonical URL), build a list of candidate
 // HTML and PDF URLs in best-success-first order:
@@ -76,7 +77,7 @@ async function timedFetch(url: string, headers: HeadersInit = {}): Promise<Respo
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
-    return await fetch(url, {
+    return await publicFetch(url, {
       signal: controller.signal,
       cache: "no-store",
       headers: {

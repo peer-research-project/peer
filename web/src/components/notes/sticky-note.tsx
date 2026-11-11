@@ -1,4 +1,5 @@
 "use client";
+import { clearUnsavedDraft, trackUnsavedDraft } from "@/store/notes-storage-runtime";
 
 // P10-09a (the owner's review 7.1; rubric B7, B8, B10; ruling §1h.78): sticky notes. "Take notes" on a selection
 // opens a small numbered window at the right, in the margin, and the reader writes in it at once. P11-14 (B P11-03 §3.2): it is a
@@ -18,7 +19,7 @@ import { useRouter } from "next/navigation";
 import type { Route } from "next";
 import type { Paper } from "@/types";
 import type { QuestionAnswers } from "@/lib/papers/report";
-import { block, quoteHead, stickyParagraphs, stickySpan, stickyTitle } from "@/lib/notes/blocks";
+import { block, newId, quoteHead, stickyParagraphs, stickySpan, stickyTitle } from "@/lib/notes/blocks";
 import type { Block } from "@/lib/notes/types";
 import { citableFromPaper } from "@/lib/notes/cite";
 import type { ReadingNoteExtras } from "@/lib/notes/templates";
@@ -152,15 +153,15 @@ export function makeStickyWriter(write: (text: string, base?: string) => string 
     timer = undefined;
     if (pending === null) return;
     const text = pending;
-    pending = null;
     const stored = base === undefined ? write(text) : write(text, base);
+    pending = null;
     if (typeof stored === "string") base = stored;
   };
   return {
     push(text: string) {
       pending = text;
       clearTimeout(timer);
-      timer = setTimeout(flush, ms);
+      timer = setTimeout(() => { try { flush(); } catch { /* Retain pending text for retry. */ } }, ms);
     },
     flush,
     cancel() {
@@ -546,9 +547,11 @@ function StickyWindow({ row, noteId, onSaved }: { row: Row; noteId: string; onSa
   const active = isFrontCard(windows, row.id);
   const [content, setContent] = useState(() => stickyContent(note?.blocks ?? [], row.id));
   const [editorVersion, setEditorVersion] = useState(0);
+  const [draftKey] = useState(() => `sticky:${noteId}:${row.id}:${newId()}`);
   const [writer] = useState(() => {
     const made = makeStickyWriter((next, base) => {
       useNotesStore.getState().setStickyBlocks(noteId, row.id, JSON.parse(next) as Block[], base ? JSON.parse(base) as Block[] : undefined);
+      clearUnsavedDraft(draftKey);
       return JSON.stringify(stickyContent(useNotesStore.getState().notes[noteId]?.blocks ?? [], row.id));
     });
     made.sync(JSON.stringify(stickyContent(note?.blocks ?? [], row.id)));
@@ -584,9 +587,13 @@ function StickyWindow({ row, noteId, onSaved }: { row: Row; noteId: string; onSa
 
   // What is typed and not yet written is written when the window goes behind, closes or is left.
   useEffect(() => {
-    if (!active) writer.flush();
+    if (!active) { try { writer.flush(); } catch { /* Retain pending text. */ } }
   }, [active, writer]);
-  useEffect(() => () => writer.flush(), [writer]);
+  useEffect(() => {
+    const retry = () => { try { writer.flush(); } catch { /* Remains pending. */ } };
+    window.addEventListener("peer:retry-notes", retry);
+    return () => { window.removeEventListener("peer:retry-notes", retry); retry(); };
+  }, [writer]);
 
   if (!note) return null;
   return (
@@ -602,6 +609,7 @@ function StickyWindow({ row, noteId, onSaved }: { row: Row; noteId: string; onSa
       onText={(next) => {
         const blocks = next.split("\n").map((text) => block("text", text));
         setContent(blocks);
+        trackUnsavedDraft(draftKey, { noteId, stickyId: row.id, blocks });
         writer.push(JSON.stringify(blocks));
       }}
       onClose={() => {
@@ -615,8 +623,9 @@ function StickyWindow({ row, noteId, onSaved }: { row: Row; noteId: string; onSa
         onSaved();
       }}
       onDelete={() => {
-        writer.cancel();
         useNotesStore.getState().removeSticky(noteId, row.id);
+        writer.cancel();
+        clearUnsavedDraft(draftKey);
         useWindows.getState().close(row.id);
       }}
       lost={lost}
@@ -632,6 +641,7 @@ function StickyWindow({ row, noteId, onSaved }: { row: Row; noteId: string; onSa
             const next = JSON.stringify(owned);
             if (next === JSON.stringify(content)) return;
             setContent(owned);
+            trackUnsavedDraft(draftKey, { noteId, stickyId: row.id, blocks: owned });
             writer.push(next);
           }} />
       </div>

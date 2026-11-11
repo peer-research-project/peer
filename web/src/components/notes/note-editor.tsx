@@ -48,15 +48,18 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type ChangeEvent,
   type ClipboardEvent,
   type KeyboardEvent,
   type MutableRefObject,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import { clearUnsavedDraft, notesStorageServerSnapshot, notesStorageSnapshot, subscribeNotesStorage, trackUnsavedDraft } from "@/store/notes-storage-runtime";
 import type { Block, BlockType, Citable, HighlightColourId, Note, NoteAnchor, Source } from "@/lib/notes/types";
 import {
   block,
+  newId,
   canIndent,
   citedKeys,
   indentBlock,
@@ -643,8 +646,8 @@ export function makeDocWriter(start: readonly Block[]) {
   let base = start;
   return (doc: { blocks: Block[] }, save: (base: readonly Block[]) => void): void => {
     const was = base;
-    base = doc.blocks;
     save(was);
+    base = doc.blocks;
   };
 }
 
@@ -762,7 +765,9 @@ export function NoteEditor({
     rows: { id: string; mid: number }[];
   } | null>(null);
   const [undo, setUndo] = useState<{ block: Block; index: number } | null>(null);
-  const [status, setStatus] = useState<"saved" | "saving">("saved");
+  const [draftKey] = useState(() => `editor:${note.id}:${newId()}`);
+  const [status, setStatus] = useState<"saved" | "saving" | "error">("saved");
+  const storageState = useSyncExternalStore(subscribeNotesStorage, notesStorageSnapshot, notesStorageServerSnapshot);
   const [notice, setNotice] = useState<string | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
 
@@ -778,27 +783,51 @@ export function NoteEditor({
     if (transient) return;
     if (doc === initial.current) return;
     dirty.current = true;
+    trackUnsavedDraft(draftKey, { noteId: note.id, document: docRef.current });
     setStatus("saving");
     const t = setTimeout(() => {
-      writeDoc();
-      dirty.current = false;
-      setStatus("saved");
+      try {
+        writeDoc();
+        dirty.current = false;
+        clearUnsavedDraft(draftKey);
+        setStatus("saved");
+      } catch {
+        setStatus("error");
+      }
     }, 500);
     return () => clearTimeout(t);
-  }, [doc, writeDoc, transient]);
+  }, [doc, writeDoc, transient, draftKey, note.id]);
   useEffect(() => {
     if (transient) return;
     const flush = () => {
       if (!dirty.current) return;
-      writeDoc();
-      dirty.current = false;
+      try {
+        writeDoc();
+        dirty.current = false;
+        clearUnsavedDraft(draftKey);
+      } catch {
+        trackUnsavedDraft(draftKey, { noteId: note.id, document: docRef.current });
+        // Keep the unsaved document in the editor and expose export/retry.
+        setStatus("error");
+      }
     };
     window.addEventListener("pagehide", flush);
     return () => {
       window.removeEventListener("pagehide", flush);
       flush();
     };
-  }, [writeDoc, transient]);
+  }, [writeDoc, transient, draftKey, note.id]);
+
+  useEffect(() => {
+    if (transient) return;
+    const retry = () => {
+      if (!dirty.current) return;
+      try { writeDoc(); dirty.current = false; clearUnsavedDraft(draftKey); setStatus("saved"); }
+      catch { setStatus("error"); }
+    };
+    window.addEventListener("peer:retry-notes", retry);
+    return () => window.removeEventListener("peer:retry-notes", retry);
+  }, [writeDoc, transient, draftKey]);
 
   useEffect(() => {
     if (compact) return;
@@ -1814,9 +1843,14 @@ export function NoteEditor({
 
   const deleteNote = () => {
     if (!window.confirm("Delete this note? It is kept only in this browser, so it cannot be brought back.")) return;
-    dirty.current = false;
-    removeNote(note.id);
-    router.push("/saved");
+    try {
+      removeNote(note.id);
+      dirty.current = false;
+      clearUnsavedDraft(draftKey);
+      router.push("/saved");
+    } catch {
+      setStatus("error");
+    }
   };
 
   // ── Derived ──
@@ -1901,8 +1935,11 @@ export function NoteEditor({
           )}
           <div className="relative flex items-center gap-3">
             <span className="annotation text-text-faint tabular-nums" aria-live="polite">
-              {notice ?? `${words} ${words === 1 ? "word" : "words"} · ${status === "saving" ? "saving…" : "kept in this browser"}`}
+              {notice ?? `${words} ${words === 1 ? "word" : "words"} · ${status === "error" || storageState.status === "error" ? "not saved — retry or export" : storageState.status === "conflict" ? "conflict — see recovery notice" : status === "saving" || storageState.status === "pending" ? "saving…" : "kept in this browser"}`}
             </span>
+            {status === "error" && <button type="button" className={COMMAND} onClick={() => {
+              try { writeDoc(); dirty.current = false; clearUnsavedDraft(draftKey); setStatus("saved"); } catch { setStatus("error"); }
+            }}>Retry saving</button>}
             <button type="button" className={COMMAND} aria-expanded={exportOpen} onClick={() => setExportOpen((o) => !o)}>
               Export
             </button>

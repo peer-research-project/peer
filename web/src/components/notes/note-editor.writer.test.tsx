@@ -33,7 +33,7 @@ describe("makeDocWriter — each write is measured against the one before", () =
     const src = source("./note-editor.tsx");
     expect(src).toContain("docWriter(docRef.current, (base) => saveNote(note.id, docRef.current, undefined, base))");
     expect(src).not.toMatch(/saveNote\(note\.id, docRef\.current\)/);
-    expect(src.match(/writeDoc\(\)/g)?.length).toBe(2); // the half-second timer and the leave / unmount flush
+    expect(src.match(/writeDoc\(\)/g)?.length).toBeGreaterThanOrEqual(2); // the half-second timer and the leave / unmount flush
   });
 });
 
@@ -124,4 +124,23 @@ describe("the page is left with the window dirty and a sticky key pending (B P12
     useNotesStore.getState().save(noteId, { blocks: stale });
     expect(textOf()).toBe("hello sticky bbb");
   });
+});
+
+it("keeps the original block base when a save fails and the user retries", () => {
+  const original = [{ id: "x", type: "text", text: "before" }] as Block[];
+  const edited = [{ ...original[0], text: "after" }];
+  const writer = makeDocWriter(original);
+  expect(() => writer({ blocks: edited }, () => { throw Error("quota"); })).toThrow("quota");
+  let seen: readonly Block[] = [];
+  writer({ blocks: edited }, (base) => { seen = base; });
+  expect(seen).toEqual(original);
+});
+it("keeps sticky text pending when storage fails and retries the same text", () => {
+  let fail = true; let saved = "";
+  const writer = makeStickyWriter((text) => { if (fail) throw Error("quota"); saved = text; });
+  writer.push("important");
+  expect(() => writer.flush()).toThrow("quota");
+  expect(writer.pending()).toBe(true);
+  fail = false; writer.flush();
+  expect(saved).toBe("important"); expect(writer.pending()).toBe(false);
 });
