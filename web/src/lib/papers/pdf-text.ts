@@ -30,6 +30,7 @@ import { withPageCase } from "./case-repair";
 import type { ExtractedDocument, ExtractedSection, ExtractedFigureCaption } from "./html-text";
 import { pictureNumber } from "./reading";
 import { FIGURE_EXTRACTION_REVISION } from "@/lib/figures/figure-revision";
+import { readBoundedResponse } from "./bounded-response";
 
 const FETCH_TIMEOUT_MS = 12_000;
 const MAX_PDF_BYTES = 18_000_000;
@@ -90,16 +91,20 @@ async function downloadPdf(
     // reason *string* reached the caller, and "PDF fetch returned 403"
     // matches no paywall-phrase regex, so every hard-403 was reported as
     // plain "source unavailable".
-    if (!res.ok) return { error: `PDF fetch returned ${res.status}`, status: res.status, finalUrl: res.url || url };
+    if (!res.ok) {
+      void res.body?.cancel().catch(() => {});
+      return { error: `PDF fetch returned ${res.status}`, status: res.status, finalUrl: res.url || url };
+    }
 
     const lengthHeader = Number.parseInt(res.headers.get("content-length") ?? "", 10);
     if (Number.isFinite(lengthHeader) && lengthHeader > MAX_PDF_BYTES) {
+      void res.body?.cancel().catch(() => {});
       return { error: "PDF too large for safe extraction." };
     }
 
-    const bytes = Buffer.from(await res.arrayBuffer());
+    const bytes = await readBoundedResponse(res, MAX_PDF_BYTES, controller.signal);
+    if (!bytes) return { error: "PDF too large for safe extraction." };
     if (bytes.byteLength === 0) return { error: "PDF response was empty." };
-    if (bytes.byteLength > MAX_PDF_BYTES) return { error: "PDF too large for safe extraction." };
     if (bytes.subarray(0, 5).toString("ascii") !== "%PDF-") {
       return { error: "Response was not a PDF." };
     }

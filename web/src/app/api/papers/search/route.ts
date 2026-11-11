@@ -13,6 +13,7 @@ const OPENALEX_API = "https://api.openalex.org/works";
 const MAILTO = process.env.OPENALEX_EMAIL ?? "peer@example.com";
 
 const RETRY_AFTER_MS = 400;
+const UPSTREAM_TIMEOUT_MS = 7_000;
 /** The longest a `Retry-After` header is honoured. Past this the reader has
  *  already been told the search did not answer, and can ask again. */
 const RETRY_AFTER_MAX_MS = 2_000;
@@ -32,23 +33,37 @@ function retryDelay(res: Response | null): number {
   return RETRY_AFTER_MS;
 }
 
-/** The upstream call, tried twice when the first answer is retryable.
- *  `null` when even the retry could not connect. */
+/** Retry a transient failure once. If a configured key is rejected, make
+ *  one anonymous attempt so that a bad credential cannot disable search. */
 async function fetchUpstream(url: string): Promise<Response | null> {
-  const attempt = () => fetch(url, { next: { revalidate: 300 } });
-  let first: Response | null = null;
+  const key = process.env.OPENALEX_API_KEY?.trim();
+  const attempt = (authenticated: boolean) => fetch(url, {
+    next: { revalidate: 300 },
+    signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+    ...(authenticated && key ? { headers: { Authorization: `Bearer ${key}` } } : {}),
+  });
+  let response: Response | null = null;
   try {
-    first = await attempt();
-    if (!retryable(first)) return first;
+    response = await attempt(true);
   } catch {
-    first = null;
+    response = null;
   }
-  await new Promise((r) => setTimeout(r, retryDelay(first)));
-  try {
-    return await attempt();
-  } catch {
-    return first;
+  if (!response || retryable(response)) {
+    await new Promise((r) => setTimeout(r, retryDelay(response)));
+    try {
+      response = await attempt(true);
+    } catch {
+      // Preserve the upstream status if the retry could not connect.
+    }
   }
+  if (key && (response?.status === 401 || response?.status === 403)) {
+    try {
+      return await attempt(false);
+    } catch {
+      return null;
+    }
+  }
+  return response;
 }
 
 const SORT_MAP = {
@@ -172,33 +187,47 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  const data = await res.json();
-  const works: OpenAlexWork[] = data.results || [];
-
-  const papers = works.map((w) => ({
-    id: normalizeOpenAlexId(w.id),
-    title: cleanDisplayText(w.title),
-    authors: w.authorships
-      .map((a) => a.author.display_name)
-      .map(cleanDisplayText)
-      .filter(Boolean),
-    leadAffiliation: leadInstitutionOf(w.authorships ?? []).name,
-    leadInstitutionId: leadInstitutionOf(w.authorships ?? []).id,
-    abstract: cleanDisplayText(reconstructAbstract(w.abstract_inverted_index)),
-    venue: cleanDisplayText(w.primary_location?.source?.display_name),
-    sourceType: classifySourceType(
-      w.primary_location?.source?.type ?? null,
-      w.primary_location?.source?.host_organization_name ?? null,
-    ),
-    isOpenAccess: !!w.open_access?.is_oa,
-    publishedDate: w.publication_date || null,
-    citationCount: w.cited_by_count || 0,
-    doi: w.doi || null,
-    url: w.doi
-      ? `https://doi.org/${w.doi.replace("https://doi.org/", "")}`
-      : w.id,
-    source: "openalex" as const,
-  }));
+  let data: { results: OpenAlexWork[]; meta?: { count?: number } };
+  try {
+    const raw: unknown = await res.json();
+    if (!raw || typeof raw !== "object" || !Array.isArray((raw as { results?: unknown }).results)) {
+      throw new Error("Unexpected search result");
+    }
+    data = raw as typeof data;
+  } catch {
+    // The upstream may disconnect or time out while streaming the body, even
+    // after it has already returned successful response headers.
+    return NextResponse.json({ error: "OpenAlex API error", status: 0 }, { status: 502 });
+  }
+  let papers;
+  try {
+    papers = data.results.map((w) => ({
+      id: normalizeOpenAlexId(w.id),
+      title: cleanDisplayText(w.title),
+      authors: w.authorships
+        .map((a) => a.author.display_name)
+        .map(cleanDisplayText)
+        .filter(Boolean),
+      leadAffiliation: leadInstitutionOf(w.authorships ?? []).name,
+      leadInstitutionId: leadInstitutionOf(w.authorships ?? []).id,
+      abstract: cleanDisplayText(reconstructAbstract(w.abstract_inverted_index)),
+      venue: cleanDisplayText(w.primary_location?.source?.display_name),
+      sourceType: classifySourceType(
+        w.primary_location?.source?.type ?? null,
+        w.primary_location?.source?.host_organization_name ?? null,
+      ),
+      isOpenAccess: !!w.open_access?.is_oa,
+      publishedDate: w.publication_date || null,
+      citationCount: w.cited_by_count || 0,
+      doi: w.doi || null,
+      url: w.doi
+        ? `https://doi.org/${w.doi.replace("https://doi.org/", "")}`
+        : w.id,
+      source: "openalex" as const,
+    }));
+  } catch {
+    return NextResponse.json({ error: "OpenAlex API error", status: 0 }, { status: 502 });
+  }
 
   return NextResponse.json({
     results: papers,

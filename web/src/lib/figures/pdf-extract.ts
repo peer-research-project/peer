@@ -4,6 +4,7 @@
 import { readFile } from "node:fs/promises";
 import { classifyHardAccessStatus } from "@/lib/papers/paywall-status";
 import { cleanDisplayText } from "@/lib/text/clean";
+import { readBoundedResponse } from "@/lib/papers/bounded-response";
 import { extractPdfFigures, MAX_PDF_BYTES } from "./pdf-engine";
 
 const FETCH_TIMEOUT_MS = 10_000;
@@ -104,12 +105,12 @@ const BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
   "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Peer/0.1";
 
-async function fetchPdfResponse(url: string): Promise<Response | null> {
+async function fetchPdfResponse(url: string): Promise<{ response: Response; bytes: Buffer | null } | null> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
   try {
-    return await fetch(url, {
+    const response = await fetch(url, {
       signal: controller.signal,
       cache: "no-store",
       redirect: "follow",
@@ -119,6 +120,16 @@ async function fetchPdfResponse(url: string): Promise<Response | null> {
         Accept: "application/pdf,text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
       },
     });
+    if (!response.ok) {
+      void response.body?.cancel().catch(() => {});
+      return { response, bytes: null };
+    }
+    const length = Number.parseInt(response.headers.get("content-length") ?? "", 10);
+    if (Number.isFinite(length) && length > MAX_PDF_BYTES) {
+      void response.body?.cancel().catch(() => {});
+      return { response, bytes: null };
+    }
+    return { response, bytes: await readBoundedResponse(response, MAX_PDF_BYTES, controller.signal) };
   } catch {
     return null;
   } finally {
@@ -134,7 +145,8 @@ export async function tryPdfCandidates(
   url: string,
   source: FigureSource,
 ): Promise<PdfAttemptResult> {
-  const res = await fetchPdfResponse(url);
+  const fetched = await fetchPdfResponse(url);
+  const res = fetched?.response;
   if (!res || !res.ok) {
     // 2-01 (Ruling 9, §1j): a hard 401/402/403/451 on an aggregator/free
     // host is a block, not a paywall — the shared helper's own host list
@@ -152,8 +164,8 @@ export async function tryPdfCandidates(
     };
   }
 
-  const contentLength = Number.parseInt(res.headers.get("content-length") ?? "", 10);
-  if (Number.isFinite(contentLength) && contentLength > MAX_PDF_BYTES) {
+  const bytes = fetched?.bytes;
+  if (!bytes) {
     return {
       status: "source_unavailable",
       candidates: [],
@@ -161,7 +173,6 @@ export async function tryPdfCandidates(
     };
   }
 
-  const bytes = Buffer.from(await res.arrayBuffer());
   if (bytes.byteLength === 0) {
     return {
       status: "source_unavailable",
@@ -169,14 +180,6 @@ export async function tryPdfCandidates(
       reason: "The legal PDF source returned an empty file.",
     };
   }
-  if (bytes.byteLength > MAX_PDF_BYTES) {
-    return {
-      status: "source_unavailable",
-      candidates: [],
-      reason: "The legal PDF source was reachable, but the file was too large for Peer to extract safely.",
-    };
-  }
-
   const looksLikePdf =
     (res.headers.get("content-type") ?? "").toLowerCase().includes("pdf") ||
     bytes.subarray(0, 5).toString("ascii") === "%PDF-";
