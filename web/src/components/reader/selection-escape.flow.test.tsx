@@ -1,4 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { IDBFactory } from "fake-indexeddb";
+import { getNotesJournal } from "@/store/notes-storage-runtime";
+
+// This staged runtime has no DOM storage; use real async transaction semantics
+// so the notes store finishes loading before these reader interaction tests.
+const values = new Map<string, string>();
+const localStorage = {
+  get length() { return values.size; },
+  key: (i: number) => [...values.keys()][i] ?? null,
+  getItem: (key: string) => values.get(key) ?? null,
+  setItem: (key: string, value: string) => { values.set(key, value); },
+  removeItem: (key: string) => { values.delete(key); },
+  clear: () => values.clear(),
+};
+const indexedDB = new IDBFactory();
 
 // P11-40 (round 2, Theme B weighed (b); ruling §1h.138 (c)): Escape does one thing at a time, nearest first. A selection standing with its buttons is put away
 // first — the selection ends and the buttons go, nothing else; then the front card closes, one Escape one card (P11-17c); and only when neither is there does
@@ -170,6 +185,8 @@ function stubPage() {
     body: {},
   });
   vi.stubGlobal("window", {
+    localStorage,
+    indexedDB,
     ...node(() => onWindow, (next) => void (onWindow = next)),
     innerWidth: 1440,
     innerHeight: 900,
@@ -246,8 +263,9 @@ function select() {
   settle();
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   stubPage();
+  await useNotesStore.persist.rehydrate();
   closeFigure();
   useHighlightStrip.getState().hide();
   openExplain = { current: null };
@@ -260,14 +278,15 @@ beforeEach(() => {
   stagedRuntime.flush();
   settle();
 });
-afterEach(() => {
+afterEach(async () => {
   mounted.unmount();
   closeFigure();
   useHighlightStrip.getState().hide();
-  vi.unstubAllGlobals();
   useMarginStore.setState({ rect: null });
   useWindows.setState({ windows: [], clock: 0, origin: null });
   useNotesStore.setState({ notes: {} });
+  await getNotesJournal((state) => state).settled();
+  vi.unstubAllGlobals();
 });
 
 describe("Escape puts the selection away first, then the cards, then leaves the paper", () => {

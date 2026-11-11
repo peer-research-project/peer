@@ -1,4 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { IDBFactory } from "fake-indexeddb";
+import { getNotesJournal } from "@/store/notes-storage-runtime";
+
+// This staged runtime has no DOM storage; use real async transaction semantics
+// so the notes store finishes loading before these reader interaction tests.
+const values = new Map<string, string>();
+const localStorage = {
+  get length() { return values.size; },
+  key: (i: number) => [...values.keys()][i] ?? null,
+  getItem: (key: string) => values.get(key) ?? null,
+  setItem: (key: string, value: string) => { values.set(key, value); },
+  removeItem: (key: string) => { values.delete(key); },
+  clear: () => values.clear(),
+};
+const indexedDB = new IDBFactory();
 
 // P11-17c rule 1 (C P11-15 "For the manager" 1; owner item 1): one Escape closes exactly one card — the front one. The four cards of the
 // margin's stack that answer Escape — the explain card, a sticky, the notes window and the figure — are mounted TOGETHER here, each as the
@@ -137,6 +152,8 @@ function stubPage() {
     body: {},
   });
   vi.stubGlobal("window", {
+    localStorage,
+    indexedDB,
     ...node(() => onWindow, (next) => void (onWindow = next)),
     innerWidth: 1440,
     innerHeight: 900,
@@ -210,8 +227,9 @@ function open(kind: Kind) {
   settle();
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   stubPage();
+  await useNotesStore.persist.rehydrate();
   closeFigure();
   openExplain = { current: null };
   notesClosed = 0;
@@ -223,13 +241,14 @@ beforeEach(() => {
   stagedRuntime.flush();
   settle();
 });
-afterEach(() => {
+afterEach(async () => {
   mounted.unmount();
   closeFigure();
-  vi.unstubAllGlobals();
   useMarginStore.setState({ rect: null });
   useWindows.setState({ windows: [], clock: 0, origin: null });
   useNotesStore.setState({ notes: {} });
+  await getNotesJournal((state) => state).settled();
+  vi.unstubAllGlobals();
 });
 
 describe("the four cards are mounted together, each as the page mounts it", () => {

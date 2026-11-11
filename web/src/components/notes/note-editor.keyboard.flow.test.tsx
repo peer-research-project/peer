@@ -1,5 +1,16 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-vi.mock("react", async (original) => ({ ...await original<typeof import("react")>(), ...(await import("@/test-support/staged-runtime")).stagedRuntime.hooks }));
+vi.mock("react", async (original) => {
+  const hooks = (await import("@/test-support/staged-runtime")).stagedRuntime.hooks;
+  return {
+    ...await original<typeof import("react")>(),
+    ...hooks,
+    useSyncExternalStore<T>(subscribe: (notify: () => void) => () => void, getSnapshot: () => T): T {
+      const [, bump] = hooks.useState(0);
+      hooks.useEffect(() => subscribe(() => bump((value: number) => value + 1)), [subscribe]);
+      return getSnapshot();
+    },
+  };
+});
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
 vi.mock("@/store/notes", () => ({ useNotesStore: (select: (state: object) => unknown) => select({ notes: [], save: vi.fn() }), newestFirst: (x: unknown) => x }));
 vi.mock("@/store/feed", () => ({ useFeedStore: (select: (state: object) => unknown) => select({ savedPapers: [], papers: [], library: [] }) }));
